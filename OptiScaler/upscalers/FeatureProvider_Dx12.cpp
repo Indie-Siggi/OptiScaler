@@ -11,6 +11,7 @@
 #include "upscalers/fsr2/FSR2Feature_Dx12.h"
 #include "upscalers/fsr2_212/FSR2Feature_Dx12_212.h"
 #include "upscalers/ffx/FFXFeature_Dx12.h"
+#include "upscalers/ffx/RayRegenFeature_Dx12.h"
 #include "upscalers/xess/XeSSFeature_Dx12.h"
 #include "FeatureProvider_Dx11.h"
 #include <misc/IdentifyGpu.h>
@@ -58,6 +59,13 @@ bool FeatureProvider_Dx12::GetFeature(Upscaler upscaler, UINT handleId, NVSDK_NG
         if (primaryGpu.dlssCapable && state.NVNGX_DLSSD_Path.has_value())
         {
             *feature = std::make_unique<DLSSDFeatureDx12>(handleId, parameters);
+            break;
+        }
+        else if (primaryGpu.rayRegenCapable)
+        {
+            // AMD FSR Ray Regeneration (FFX-MLD) fills the Ray Reconstruction slot on RDNA4,
+            // where the NVIDIA DLSS-D backend is unavailable. See OPTISCALER_RR_PLAN.md "Path B".
+            *feature = std::make_unique<RayRegenFeatureDx12>(handleId, parameters);
             break;
         }
         else

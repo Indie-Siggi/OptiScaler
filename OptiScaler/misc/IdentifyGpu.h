@@ -59,6 +59,7 @@ struct GpuInformation
     bool softwareAdapter = false;
 
     bool fsr4Capable = false;
+    bool rayRegenCapable = false; // RDNA4 + WMMA/fp8 path for the FFX-MLD Ray Regen denoiser
     ID3D12Device* d3d12device = nullptr;
 
     bool dlssCapable = false;

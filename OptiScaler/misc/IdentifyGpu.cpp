@@ -491,6 +491,9 @@ void IdentifyGpu::updateD3d12Capabilities(D3d12Proxy::PFN_D3D12CreateDevice o_D3
                 {
                     gpuInfo.usesVkd3dProton = res.usesVkd3dProton;
                     gpuInfo.fsr4Capable = res.fsr4Capable;
+                    // Ray Regen (FFX-MLD) shares the RDNA4 + fp8/WMMA requirement with FSR4; gate on
+                    // the same capability for now. Refine if a stricter MLD 1.1.0 check is needed.
+                    gpuInfo.rayRegenCapable = res.fsr4Capable;
                     break;
                 }
             }
