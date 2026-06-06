@@ -106,6 +106,15 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
         return false;
     }
 
+    // Load per-game conversion tunables from OptiScaler.ini [RayRegen]; tune in-game (Phase 5).
+    const Config& cfg = *Config::Instance();
+    _depthLinA = cfg.RrDepthLinA.value_or_default();
+    _depthLinB = cfg.RrDepthLinB.value_or_default();
+    _motionScaleX = cfg.RrMotionScaleX.value_or_default();
+    _motionScaleY = cfg.RrMotionScaleY.value_or_default();
+    _normalsArePacked = cfg.RrNormalsArePacked.value_or_default() ? 1u : 0u;
+    _demodulateRadiance = cfg.RrDemodulateRadiance.value_or_default() ? 1u : 0u;
+
     _resetHistory = true;
     SetInit(true);
     return true;
@@ -142,8 +151,27 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
 
     dispatchDesc.frameIndex = static_cast<uint32_t>(_frameCount);
 
-    // TODO(Phase 3): deltaTime + camera vectors (positionDelta/right/up/forward, near/far/fov/aspect)
-    // derived from the NGX view/projection matrices. Zeroed in the scaffold.
+    // Camera near/far/fov + frame time. Read the FSR.* keys the game/OptiScaler may populate, else fall
+    // back to sane defaults. The camera basis vectors (right/up/forward) and positionDelta require the
+    // view matrix, which NGX does not expose here (only Position_ViewSpace), so they are left zero and the
+    // denoiser falls back to motion-vector-only reprojection. TODO(Phase 5): recover the view matrix.
+    float camNear = 0.0f, camFar = 0.0f, camFov = 0.0f, frameTimeMs = 0.0f;
+
+    if (InParameters->Get(OptiKeys::FSR_NearPlane, &camNear) != NVSDK_NGX_Result_Success || camNear <= 0.0f)
+        camNear = 0.1f;
+    if (InParameters->Get(OptiKeys::FSR_FarPlane, &camFar) != NVSDK_NGX_Result_Success || camFar <= 0.0f)
+        camFar = 10000.0f;
+    if (InParameters->Get(OptiKeys::FSR_CameraFovVertical, &camFov) != NVSDK_NGX_Result_Success || camFov <= 0.0f)
+        camFov = 1.047198f; // 60 degrees in radians
+    if (InParameters->Get(NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, &frameTimeMs) != NVSDK_NGX_Result_Success ||
+        frameTimeMs < 1.0f)
+        frameTimeMs = 16.7f;
+
+    dispatchDesc.cameraNear = camNear;
+    dispatchDesc.cameraFar = camFar;
+    dispatchDesc.cameraFovAngleVertical = camFov;
+    dispatchDesc.cameraAspectRatio = (_renderHeight > 0) ? (float) _renderWidth / (float) _renderHeight : 1.0f;
+    dispatchDesc.deltaTime = frameTimeMs;
 
     // --- Read the intercepted NGX Ray-Reconstruction inputs --------------------------------------
     ID3D12Resource* inColor = nullptr;   InParameters->Get(NVSDK_NGX_Parameter_Color, &inColor);

@@ -421,6 +421,15 @@ class Config
     CustomOptional<bool> Fsr4ForceCapable { false };
     CustomOptional<uint32_t, NoDefault> Fsr4Model;
     CustomOptional<bool> Fsr4EnableWatermark { false };
+
+    // FSR Ray Regeneration (FFX-MLD) NGX-RR -> MLD conversion tunables ([RayRegen]); tune in-game (Phase 5).
+    CustomOptional<float> RrDepthLinA { 1.0f };       // linearDepth = 1 / (A * deviceDepth + B)
+    CustomOptional<float> RrDepthLinB { 0.0f };
+    CustomOptional<float> RrMotionScaleX { 1.0f };    // NGX motion vectors -> UV (PreviousUV - CurrentUV)
+    CustomOptional<float> RrMotionScaleY { 1.0f };
+    CustomOptional<bool> RrNormalsArePacked { true }; // normals stored as n * 0.5 + 0.5
+    CustomOptional<bool> RrDemodulateRadiance { false }; // divide noisy colour by fused albedo
+
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };
     CustomOptional<bool> FsrNonLinearPQ { false };

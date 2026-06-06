@@ -262,6 +262,13 @@ bool Config::Reload(std::filesystem::path iniPath)
             Fsr4ForceCapable.set_from_config(readBool("FSR", "Fsr4ForceCapable"));
             Fsr4EnableWatermark.set_from_config(readBool("FSR", "Fsr4EnableWatermark"));
 
+            RrDepthLinA.set_from_config(readFloat("RayRegen", "DepthLinA"));
+            RrDepthLinB.set_from_config(readFloat("RayRegen", "DepthLinB"));
+            RrMotionScaleX.set_from_config(readFloat("RayRegen", "MotionScaleX"));
+            RrMotionScaleY.set_from_config(readFloat("RayRegen", "MotionScaleY"));
+            RrNormalsArePacked.set_from_config(readBool("RayRegen", "NormalsArePacked"));
+            RrDemodulateRadiance.set_from_config(readBool("RayRegen", "DemodulateRadiance"));
+
             if (auto setting = readInt("FSR", "Fsr4Model"); setting.has_value() && setting >= 0 && setting <= 5)
                 Fsr4Model.set_from_config(setting);
 
@@ -1018,6 +1025,15 @@ bool Config::SaveIni()
         ini.SetValue("FSR", "VerticalFov", GetFloatValue(Instance()->FsrVerticalFov.value_for_config()).c_str());
         ini.SetValue("FSR", "HorizontalFov", GetFloatValue(Instance()->FsrHorizontalFov.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraNear", GetFloatValue(Instance()->FsrCameraNear.value_for_config()).c_str());
+
+        ini.SetValue("RayRegen", "DepthLinA", GetFloatValue(Instance()->RrDepthLinA.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "DepthLinB", GetFloatValue(Instance()->RrDepthLinB.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "MotionScaleX", GetFloatValue(Instance()->RrMotionScaleX.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "MotionScaleY", GetFloatValue(Instance()->RrMotionScaleY.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "NormalsArePacked",
+                     GetBoolValue(Instance()->RrNormalsArePacked.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "DemodulateRadiance",
+                     GetBoolValue(Instance()->RrDemodulateRadiance.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());
