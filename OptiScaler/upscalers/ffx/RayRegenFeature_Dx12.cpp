@@ -72,11 +72,15 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
 
     GetRenderResolution(InParameters, &_renderWidth, &_renderHeight);
 
+    // Resolve the per-game RR conversion profile (Step 2: default profile from [RayRegen] ini).
+    _profile = ResolveRRProfile();
+    LOG_INFO("RR profile: {0}", _profile.name);
+
     ffxCreateContextDescDenoiser denoiserDesc = { 0 };
     denoiserDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_DENOISER;
     denoiserDesc.version = FFX_DENOISER_VERSION;
     denoiserDesc.maxRenderSize = { _renderWidth, _renderHeight };
-    denoiserDesc.mode = _mode; // FFX_DENOISER_MODE_1_SIGNAL (only mode reachable from NGX-RR)
+    denoiserDesc.mode = _profile.denoiserMode; // 1-signal (only mode reachable from NGX-RR today)
     denoiserDesc.flags = 0;
 
     ffxCreateBackendDX12Desc backendDesc = { 0 };
@@ -97,7 +101,8 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
         }
     }
 
-    LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight, _mode);
+    LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight,
+             _profile.denoiserMode);
 
     _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
     if (_convert == nullptr || !_convert->IsInit())
@@ -105,15 +110,6 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
         LOG_ERROR("Failed to create the NGX-RR -> MLD conversion shader");
         return false;
     }
-
-    // Load per-game conversion tunables from OptiScaler.ini [RayRegen]; tune in-game (Phase 5).
-    const Config& cfg = *Config::Instance();
-    _depthLinA = cfg.RrDepthLinA.value_or_default();
-    _depthLinB = cfg.RrDepthLinB.value_or_default();
-    _motionScaleX = cfg.RrMotionScaleX.value_or_default();
-    _motionScaleY = cfg.RrMotionScaleY.value_or_default();
-    _normalsArePacked = cfg.RrNormalsArePacked.value_or_default() ? 1u : 0u;
-    _demodulateRadiance = cfg.RrDemodulateRadiance.value_or_default() ? 1u : 0u;
 
     _resetHistory = true;
     SetInit(true);
@@ -182,12 +178,29 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     ID3D12Resource* inDiffAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_DiffuseAlbedo, &inDiffAlb);
     ID3D12Resource* inSpecAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_SpecularAlbedo, &inSpecAlb);
 
-    if (inColor == nullptr || inOutput == nullptr || inDepth == nullptr || inMv == nullptr ||
-        inNormals == nullptr || inDiffAlb == nullptr || inSpecAlb == nullptr)
+    // Only colour/depth/output are mandatory. Missing optional GBuffer inputs degrade gracefully (Step 1):
+    // their SRV is bound to a valid stand-in (colour) and the shader ignores it via InputMask, so an
+    // unprofiled game keeps rendering (to tune) instead of bricking the feature.
+    if (inColor == nullptr || inOutput == nullptr || inDepth == nullptr)
     {
-        LOG_ERROR("Missing NGX Ray Reconstruction input(s) (color/output/depth/mv/normals/albedo)");
+        LOG_ERROR("Missing mandatory NGX Ray Reconstruction input (color/output/depth)");
         return false;
     }
+
+    uint32_t inputMask = 0;
+    if (inMv != nullptr)      inputMask |= RR_INPUT_HAS_MOTIONVECTORS;
+    if (inNormals != nullptr) inputMask |= RR_INPUT_HAS_NORMALS;
+    if (inDiffAlb != nullptr) inputMask |= RR_INPUT_HAS_DIFFUSE_ALBEDO;
+    if (inSpecAlb != nullptr) inputMask |= RR_INPUT_HAS_SPECULAR_ALBEDO;
+
+    if (inputMask != RR_INPUT_ALL)
+        LOG_WARN("RR: missing optional GBuffer input(s) (mask 0x{0:x}); using neutral defaults", inputMask);
+
+    // Bind a valid stand-in for any missing optional input; the shader ignores it via the mask.
+    if (inMv == nullptr)      inMv = inColor;
+    if (inNormals == nullptr) inNormals = inColor;
+    if (inDiffAlb == nullptr) inDiffAlb = inColor;
+    if (inSpecAlb == nullptr) inSpecAlb = inColor;
 
     // Lazily allocate the conversion output textures (render-res; heap props copied from color).
     if (!_convert->CanRender() && !_convert->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
@@ -200,12 +213,13 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     RRConstants rrc {};
     rrc.RenderWidth = _renderWidth;
     rrc.RenderHeight = _renderHeight;
-    rrc.MotionScaleX = _motionScaleX;
-    rrc.MotionScaleY = _motionScaleY;
-    rrc.DepthLinA = _depthLinA;
-    rrc.DepthLinB = _depthLinB;
-    rrc.NormalsArePacked = _normalsArePacked;
-    rrc.DemodulateRadiance = _demodulateRadiance;
+    rrc.MotionScaleX = _profile.motionScaleX;
+    rrc.MotionScaleY = _profile.motionScaleY;
+    rrc.DepthLinA = _profile.depthLinA;
+    rrc.DepthLinB = _profile.depthLinB;
+    rrc.NormalsArePacked = _profile.normalsArePacked ? 1u : 0u;
+    rrc.DemodulateRadiance = _profile.demodulateRadiance ? 1u : 0u;
+    rrc.InputMask = inputMask;
 
     if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb))
     {

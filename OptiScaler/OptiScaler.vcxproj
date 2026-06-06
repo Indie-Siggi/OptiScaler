@@ -493,6 +493,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="upscalers\ffx\FFXFeature_Dx11On12.h" />
     <ClInclude Include="upscalers\ffx\FFXFeature_Dx12.h" />
     <ClInclude Include="upscalers\ffx\RayRegenFeature_Dx12.h" />
+    <ClInclude Include="upscalers\ffx\RRGameProfile.h" />
     <ClInclude Include="upscalers\ffx\ffx_denoiser.h" />
     <ClInclude Include="upscalers\ffx\ffx_denoiser.hpp" />
     <ClInclude Include="upscalers\ffx\FFXFeature_Vk.h" />
@@ -721,6 +722,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="upscalers\ffx\FFXFeature_Dx11On12.cpp" />
     <ClCompile Include="upscalers\ffx\FFXFeature_Dx12.cpp" />
     <ClCompile Include="upscalers\ffx\RayRegenFeature_Dx12.cpp" />
+    <ClCompile Include="upscalers\ffx\RRGameProfile.cpp" />
     <ClCompile Include="upscalers\ffx\FFXFeature_Vk.cpp" />
     <ClCompile Include="upscalers\IFeature_Dx11.cpp" />
     <ClCompile Include="upscalers\IFeature_Dx11wDx12.cpp" />

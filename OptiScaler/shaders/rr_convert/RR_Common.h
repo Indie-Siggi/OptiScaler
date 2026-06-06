@@ -2,6 +2,14 @@
 
 #include "SysUtils.h"
 
+// InputMask bits: which optional GBuffer inputs the game provided. Missing inputs are bound to a valid
+// stand-in resource and ignored via the mask (neutral defaults). Keep in sync with shaderCode below.
+#define RR_INPUT_HAS_MOTIONVECTORS   1u
+#define RR_INPUT_HAS_NORMALS         2u
+#define RR_INPUT_HAS_DIFFUSE_ALBEDO  4u
+#define RR_INPUT_HAS_SPECULAR_ALBEDO 8u
+#define RR_INPUT_ALL                 15u
+
 // Constants for the NGX Ray-Reconstruction -> FFX-MLD input conversion shader.
 // Field order/layout must match the cbuffer in shaderCode below.
 struct alignas(256) RRConstants
@@ -14,6 +22,7 @@ struct alignas(256) RRConstants
     float DepthLinB;
     uint32_t NormalsArePacked; // 1 if normals are stored as n * 0.5 + 0.5
     uint32_t DemodulateRadiance; // 1 to divide the noisy colour by fused albedo (per-game; tune in-game)
+    uint32_t InputMask;          // RR_INPUT_HAS_* bits; missing inputs use neutral defaults
 };
 
 // HLSL converter. Runtime-compiled as cs_5_0 when UsePrecompiledShaders=false; otherwise the
@@ -34,6 +43,7 @@ cbuffer Params : register(b0)
     float DepthLinB;
     uint  NormalsArePacked;
     uint  DemodulateRadiance;
+    uint  InputMask;          // bit0 MV, bit1 normals, bit2 diffuseAlbedo, bit3 specularAlbedo
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -80,18 +90,26 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     OutLinearDepth[tid.xy] = abs(linDepth);
 
     // Motion vectors -> UV space (PreviousUV - CurrentUV). B = depth delta (needs history; 0 for now).
-    float2 mv = InMotionVectors.Load(p).xy;
+    // Missing (bit0 clear) -> zero motion (denoiser treats the pixel as static).
+    float2 mv = (InputMask & 1u) ? InMotionVectors.Load(p).xy : float2(0.0, 0.0);
     OutMotionVectors[tid.xy] = float4(mv.x * MotionScaleX, mv.y * MotionScaleY, 0.0, 0.0);
 
     // Normal (+ roughness) -> octahedral RG, B roughness, A material type (0 = default).
-    float4 nr = InNormalRoughness.Load(p);
-    float3 n = NormalsArePacked ? (nr.xyz * 2.0 - 1.0) : nr.xyz;
-    n = normalize(n);
-    OutNormals[tid.xy] = float4(OctEncode(n), nr.w, 0.0);
+    // Missing (bit1 clear) -> facing normal (0,0,1) + mid roughness. Guard normalize against zero vectors.
+    float3 n = float3(0.0, 0.0, 1.0);
+    float roughness = 0.5;
+    if (InputMask & 2u)
+    {
+        float4 nr = InNormalRoughness.Load(p);
+        n = NormalsArePacked ? (nr.xyz * 2.0 - 1.0) : nr.xyz;
+        n = (dot(n, n) > 1e-8) ? normalize(n) : float3(0.0, 0.0, 1.0);
+        roughness = nr.w;
+    }
+    OutNormals[tid.xy] = float4(OctEncode(n), roughness, 0.0);
 
-    // Albedo: pass through linear; dispatch sets NON_GAMMA so no sqrt encoding is applied here.
-    float3 diff = InDiffuseAlbedo.Load(p).rgb;
-    float3 spec = InSpecularAlbedo.Load(p).rgb;
+    // Albedo: linear pass-through; dispatch sets NON_GAMMA. Missing (bits2/3 clear) -> 0 (neutral).
+    float3 diff = (InputMask & 4u) ? InDiffuseAlbedo.Load(p).rgb : float3(0.0, 0.0, 0.0);
+    float3 spec = (InputMask & 8u) ? InSpecularAlbedo.Load(p).rgb : float3(0.0, 0.0, 0.0);
     OutDiffuseAlbedo[tid.xy]  = float4(diff, 1.0);
     OutSpecularAlbedo[tid.xy] = float4(spec, 1.0);
     float3 fused = max(spec, diff);

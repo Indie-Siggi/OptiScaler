@@ -1,0 +1,30 @@
+#pragma once
+
+#include <cstdint>
+
+// Per-game RR conversion profile.
+//
+// Step 2 (OPTISCALER_RR_PLAN.md Appendix B): this holds the current global tunables + denoiser mode as a
+// single "default" profile so RayRegenFeature_Dx12 routes through one struct instead of scattered members.
+// Steps 3-4 add input bindings (logical input -> NGX key / Streamline / derived) and convention enums
+// (normal space, MV convention, depth/reversed-Z, albedo encoding, radiance convention) here. Step 5
+// selects per-game profiles by State::GameName / NVNGX_Engine, with [RayRegen] ini overriding any field.
+struct RRGameProfile
+{
+    const char* name = "default";
+
+    uint32_t denoiserMode = 2; // FfxApiDenoiserMode; 2 = FFX_DENOISER_MODE_1_SIGNAL
+
+    // Conversion tunables (see shaders/rr_convert/RR_Common.h).
+    float depthLinA = 1.0f;    // linearDepth = 1 / (A * deviceDepth + B)
+    float depthLinB = 0.0f;
+    float motionScaleX = 1.0f; // NGX motion vectors -> UV (PreviousUV - CurrentUV)
+    float motionScaleY = 1.0f;
+    bool normalsArePacked = true;
+    bool demodulateRadiance = false;
+};
+
+// Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].
+// TODO(Step 5): branch on State::Instance().GameName / NVNGX_Engine for per-game profiles, then apply
+// the [RayRegen] ini overrides on top of the selected profile.
+RRGameProfile ResolveRRProfile();

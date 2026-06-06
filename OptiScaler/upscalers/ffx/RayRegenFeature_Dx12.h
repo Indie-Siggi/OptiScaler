@@ -15,6 +15,7 @@
 #include "ffx_denoiser.h" // vendored: ffxCreateContextDescDenoiser / ffxDispatchDescDenoiserInput1Signal (C API)
 #include <upscalers/IFeature_Dx12.h>
 #include <shaders/rr_convert/RR_Dx12.h>
+#include "RRGameProfile.h"
 #include <memory>
 
 class RayRegenFeatureDx12 : public IFeature_Dx12
@@ -22,9 +23,9 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
   private:
     ffxContext _denoiserContext = nullptr;
 
-    // 1-signal is the only mode reachable from the NGX-RR contract (a single combined noisy
-    // colour). 2/4-signal need decomposed radiance the call site does not expose. See Appendix A.
-    uint32_t _mode = FFX_DENOISER_MODE_1_SIGNAL;
+    // Per-game RR conversion profile (input conventions + denoiser mode + tunables). Step 2: the default
+    // profile from ResolveRRProfile(); per-game selection comes later (OPTISCALER_RR_PLAN.md Appendix B).
+    RRGameProfile _profile;
 
     // Needed for ffxDispatchDescDenoiser.cameraPositionDelta (PreviousPosition - CurrentPosition).
     float _prevCameraPosition[3] = { 0.0f, 0.0f, 0.0f };
@@ -36,14 +37,6 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     // NGX-RR -> MLD input conversion (linearize depth, octahedral normals, fused albedo, UV
     // motion vectors, radiance). Produces the 7 MLD dispatch inputs. See shaders/rr_convert.
     std::unique_ptr<RR_Dx12> _convert;
-
-    // Per-game conversion tunables (defaults; refine via the menu / in-game in Phase 5).
-    float _depthLinA = 1.0f;          // linearDepth = 1 / (A * deviceDepth + B); TODO derive from NGX matrices
-    float _depthLinB = 0.0f;
-    float _motionScaleX = 1.0f;       // NGX motion vectors -> UV; TODO confirm per-game scale/sign
-    float _motionScaleY = 1.0f;
-    uint32_t _normalsArePacked = 1;   // assume normals stored as n*0.5+0.5; TODO confirm
-    uint32_t _demodulateRadiance = 0; // divide noisy colour by fused albedo; TODO tune per-game
 
     bool CreateDenoiserContext(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters);
     void ReleaseDenoiserContext();
