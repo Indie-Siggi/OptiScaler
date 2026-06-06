@@ -99,6 +99,13 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
 
     LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight, _mode);
 
+    _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
+    if (_convert == nullptr || !_convert->IsInit())
+    {
+        LOG_ERROR("Failed to create the NGX-RR -> MLD conversion shader");
+        return false;
+    }
+
     _resetHistory = true;
     SetInit(true);
     return true;
@@ -138,44 +145,65 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // TODO(Phase 3): deltaTime + camera vectors (positionDelta/right/up/forward, near/far/fov/aspect)
     // derived from the NGX view/projection matrices. Zeroed in the scaffold.
 
-    // --- Guide buffers ---------------------------------------------------------------------------
-    // Scaffold: raw NGX buffers are passed straight through. The conversion shader (Phase 2) must
-    // replace these with MLD-encoded equivalents (abs-linear depth; octahedral normals + roughness +
-    // material; sqrt albedo; UV motion vectors + depth delta).
-    ID3D12Resource* paramColor = nullptr;
-    InParameters->Get(NVSDK_NGX_Parameter_Color, &paramColor);
+    // --- Read the intercepted NGX Ray-Reconstruction inputs --------------------------------------
+    ID3D12Resource* inColor = nullptr;   InParameters->Get(NVSDK_NGX_Parameter_Color, &inColor);
+    ID3D12Resource* inOutput = nullptr;  InParameters->Get(NVSDK_NGX_Parameter_Output, &inOutput);
+    ID3D12Resource* inDepth = nullptr;   InParameters->Get(NVSDK_NGX_Parameter_Depth, &inDepth);
+    ID3D12Resource* inMv = nullptr;      InParameters->Get(NVSDK_NGX_Parameter_MotionVectors, &inMv);
+    ID3D12Resource* inNormals = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_Normals, &inNormals);
+    ID3D12Resource* inDiffAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_DiffuseAlbedo, &inDiffAlb);
+    ID3D12Resource* inSpecAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_SpecularAlbedo, &inSpecAlb);
 
-    ID3D12Resource* paramOutput = nullptr;
-    InParameters->Get(NVSDK_NGX_Parameter_Output, &paramOutput);
-
-    ID3D12Resource* paramDepth = nullptr;
-    InParameters->Get(NVSDK_NGX_Parameter_Depth, &paramDepth);
-
-    ID3D12Resource* paramMv = nullptr;
-    InParameters->Get(NVSDK_NGX_Parameter_MotionVectors, &paramMv);
-
-    if (paramColor == nullptr || paramOutput == nullptr)
+    if (inColor == nullptr || inOutput == nullptr || inDepth == nullptr || inMv == nullptr ||
+        inNormals == nullptr || inDiffAlb == nullptr || inSpecAlb == nullptr)
     {
-        LOG_ERROR("Color/Output resources not provided!");
+        LOG_ERROR("Missing NGX Ray Reconstruction input(s) (color/output/depth/mv/normals/albedo)");
         return false;
     }
 
-    if (paramDepth != nullptr)
-        dispatchDesc.linearDepth = ffxApiGetResourceDX12(paramDepth, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    // Lazily allocate the conversion output textures (render-res; heap props copied from color).
+    if (!_convert->CanRender() && !_convert->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
+    {
+        LOG_ERROR("Failed to allocate conversion output buffers");
+        return false;
+    }
 
-    if (paramMv != nullptr)
-        dispatchDesc.motionVectors = ffxApiGetResourceDX12(paramMv, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    // Convert the NGX-RR buffers into the MLD 1-signal inputs.
+    RRConstants rrc {};
+    rrc.RenderWidth = _renderWidth;
+    rrc.RenderHeight = _renderHeight;
+    rrc.MotionScaleX = _motionScaleX;
+    rrc.MotionScaleY = _motionScaleY;
+    rrc.DepthLinA = _depthLinA;
+    rrc.DepthLinB = _depthLinB;
+    rrc.NormalsArePacked = _normalsArePacked;
+    rrc.DemodulateRadiance = _demodulateRadiance;
 
-    // TODO(Phase 2): dispatchDesc.normals / specularAlbedo / diffuseAlbedo from the NGX GBuffer,
-    // in MLD encodings (octahedral normals; sqrt albedo). These are mandatory inputs for the MLD
-    // dispatch, so the result is incomplete until the conversion shader populates them.
+    if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb))
+    {
+        LOG_ERROR("NGX-RR -> MLD conversion dispatch failed");
+        return false;
+    }
 
-    // --- 1-signal radiance payload (chained via header.pNext) ------------------------------------
+    // Make the converted inputs readable by the denoiser.
+    _convert->TransitionOutputs(InCommandList, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    // Albedo is passed linear, so tell MLD not to assume sqrt encoding.
+    dispatchDesc.flags |= FFX_DENOISER_DISPATCH_NON_GAMMA_ALBEDO;
+
+    // Always-bound guide buffers (from the converter).
+    dispatchDesc.linearDepth = ffxApiGetResourceDX12(_convert->LinearDepth(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchDesc.motionVectors = ffxApiGetResourceDX12(_convert->MotionVectors(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchDesc.normals = ffxApiGetResourceDX12(_convert->Normals(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchDesc.specularAlbedo = ffxApiGetResourceDX12(_convert->SpecularAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchDesc.diffuseAlbedo = ffxApiGetResourceDX12(_convert->DiffuseAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+
+    // 1-signal radiance: noisy radiance in (from converter) -> denoised out (app output target).
     ffxDispatchDescDenoiserInput1Signal sig = { 0 };
     sig.header.type = FFX_API_DISPATCH_DESC_INPUT_1_SIGNAL_TYPE_DENOISER;
-    sig.radiance.input = ffxApiGetResourceDX12(paramColor, FFX_API_RESOURCE_STATE_COMPUTE_READ);
-    sig.radiance.output = ffxApiGetResourceDX12(paramOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
-    // TODO(Phase 2): sig.fusedAlbedo = sqrt(max(specularAlbedo, diffuseAlbedo)) from conversion shader.
+    sig.radiance.input = ffxApiGetResourceDX12(_convert->Radiance(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    sig.radiance.output = ffxApiGetResourceDX12(inOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+    sig.fusedAlbedo = ffxApiGetResourceDX12(_convert->FusedAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
 
     dispatchDesc.header.pNext = &sig.header;
 
