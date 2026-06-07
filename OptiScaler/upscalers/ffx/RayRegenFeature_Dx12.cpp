@@ -215,8 +215,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.RenderHeight = _renderHeight;
     rrc.MotionScaleX = _profile.motionScaleX;
     rrc.MotionScaleY = _profile.motionScaleY;
-    rrc.DepthLinA = _profile.depthLinA;
-    rrc.DepthLinB = _profile.depthLinB;
+    rrc.NearPlane = camNear;
+    rrc.FarPlane = camFar;
+    rrc.ReversedZ = _profile.reversedZ ? 1u : 0u;
     rrc.NormalsArePacked = _profile.normalsArePacked ? 1u : 0u;
     rrc.DemodulateRadiance = _profile.demodulateRadiance ? 1u : 0u;
     rrc.InputMask = inputMask;

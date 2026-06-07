@@ -22,6 +22,7 @@ struct RRGameProfile
     float motionScaleY = 1.0f;
     bool normalsArePacked = true;
     bool demodulateRadiance = false;
+    bool reversedZ = true; // device depth is reversed-Z (1=near, 0=far); Cyberpunk and most modern engines
 };
 
 // Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].
