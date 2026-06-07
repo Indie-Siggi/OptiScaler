@@ -147,6 +147,9 @@ class StreamlineHooks
     static void unhookDlss();
     static void hookDlss(HMODULE slDlss);
 
+    static void unhookDlssd();
+    static void hookDlssd(HMODULE slDlssd);
+
     static void unhookDlssg();
     static void hookDlssg(HMODULE slDlssg);
 
@@ -164,6 +167,7 @@ class StreamlineHooks
 
     static bool isInterposerHooked();
     static bool isDlssHooked();
+    static bool isDlssdHooked();
     static bool isDlssgHooked();
     static bool isLocalDlssgHooked();
     static bool isCommonHooked();
@@ -226,6 +230,14 @@ class StreamlineHooks
     static bool hkdlss_slOnPluginLoad(sl::param::IParameters* params, const char* loaderJSON, const char** pluginJSON);
     static sl::Result hkslDLSSGetOptimalSettings(const sl::DLSSOptions& options, sl::DLSSOptimalSettings& settings);
     static void* hkdlss_slGetPluginFunction(const char* functionName);
+
+    // DLSS-D (Ray Reconstruction)
+    static PFN_slGetPluginFunction o_dlssd_slGetPluginFunction;
+    static PFN_slOnPluginLoad o_dlssd_slOnPluginLoad;
+
+    static bool hkdlssd_slOnPluginLoad(sl::param::IParameters* params, const char* loaderJSON,
+                                       const char** pluginJSON);
+    static void* hkdlssd_slGetPluginFunction(const char* functionName);
 
     // DLSSG
     static PFN_slGetPluginFunction o_dlssg_slGetPluginFunction;
@@ -304,6 +316,8 @@ class StreamlineHooks
     VALIDATE_MEMBER_HOOK(hkdlss_slOnPluginLoad, PFN_slOnPluginLoad)
     VALIDATE_MEMBER_HOOK(hkslDLSSGetOptimalSettings, decltype(&slDLSSGetOptimalSettings))
     VALIDATE_MEMBER_HOOK(hkdlss_slGetPluginFunction, PFN_slGetPluginFunction)
+    VALIDATE_MEMBER_HOOK(hkdlssd_slOnPluginLoad, PFN_slOnPluginLoad)
+    VALIDATE_MEMBER_HOOK(hkdlssd_slGetPluginFunction, PFN_slGetPluginFunction)
     VALIDATE_MEMBER_HOOK(hkdlssg_slOnPluginLoad, PFN_slOnPluginLoad)
     VALIDATE_MEMBER_HOOK(hkslSetConstants, decltype(&slSetConstants))
     VALIDATE_MEMBER_HOOK(hkslDLSSGSetOptions, decltype(&slDLSSGSetOptions))

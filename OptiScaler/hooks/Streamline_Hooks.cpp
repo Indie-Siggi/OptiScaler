@@ -43,6 +43,10 @@ StreamlineHooks::PFN_slGetPluginFunction StreamlineHooks::o_dlss_slGetPluginFunc
 StreamlineHooks::PFN_slOnPluginLoad StreamlineHooks::o_dlss_slOnPluginLoad = nullptr;
 decltype(&slDLSSGetOptimalSettings) StreamlineHooks::o_slDLSSGetOptimalSettings = nullptr;
 
+// DLSS-D (Ray Reconstruction)
+StreamlineHooks::PFN_slGetPluginFunction StreamlineHooks::o_dlssd_slGetPluginFunction = nullptr;
+StreamlineHooks::PFN_slOnPluginLoad StreamlineHooks::o_dlssd_slOnPluginLoad = nullptr;
+
 // DLSSG
 StreamlineHooks::PFN_slGetPluginFunction StreamlineHooks::o_dlssg_slGetPluginFunction = nullptr;
 StreamlineHooks::PFN_slOnPluginLoad StreamlineHooks::o_dlssg_slOnPluginLoad = nullptr;
@@ -506,10 +510,12 @@ void StreamlineHooks::spoofArch(uint32_t currentArch, sl::Feature feature, Syste
             return setArch(maxArch, altSystemCaps);
     }
 
-    // Don't spoof DLSSD at all
+    // DLSS-D / Ray Reconstruction: spoof a Turing+ arch (same rule as DLSS) so Streamline's systemCaps
+    // report the GPU as RR-capable. We serve RR via the FFX-MLD RayRegenFeatureDx12 on RDNA4.
     else if (feature == sl::kFeatureDLSS_RR)
     {
-        return;
+        if (currentArch < NV_GPU_ARCHITECTURE_TU100)
+            return setArch(maxArch, altSystemCaps);
     }
 
     // Don't change arch for DLSSG with ada and above
@@ -1081,6 +1087,42 @@ void* StreamlineHooks::hkdlss_slGetPluginFunction(const char* functionName)
     return o_dlss_slGetPluginFunction(functionName);
 }
 
+bool StreamlineHooks::hkdlssd_slOnPluginLoad(sl::param::IParameters* params, const char* loaderJSON,
+                                             const char** pluginJSON)
+{
+    LOG_FUNC();
+
+    // Spoof the GPU arch to Turing+ for the duration of the DLSS-D plugin's startup so it considers the
+    // GPU Ray-Reconstruction-capable. We then serve RR via the FFX-MLD RayRegenFeatureDx12.
+    uint32_t currentArch = 0;
+    if (Config::Instance()->StreamlineSpoofing.value_or_default())
+    {
+        hookSystemCaps(params);
+        currentArch = getSystemCapsArch();
+        spoofArch(currentArch, sl::kFeatureDLSS_RR);
+    }
+
+    auto result = o_dlssd_slOnPluginLoad(params, loaderJSON, pluginJSON);
+
+    if (Config::Instance()->StreamlineSpoofing.value_or_default())
+        setArch(currentArch);
+
+    return result;
+}
+
+void* StreamlineHooks::hkdlssd_slGetPluginFunction(const char* functionName)
+{
+    LOG_DEBUG("{}", functionName);
+
+    if (strcmp(functionName, "slOnPluginLoad") == 0)
+    {
+        o_dlssd_slOnPluginLoad = (PFN_slOnPluginLoad) o_dlssd_slGetPluginFunction(functionName);
+        return &hkdlssd_slOnPluginLoad;
+    }
+
+    return o_dlssd_slGetPluginFunction(functionName);
+}
+
 void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
 {
     // LOG_DEBUG("{}", functionName);
@@ -1596,6 +1638,52 @@ void StreamlineHooks::hookDlss(HMODULE slDlss)
     }
 }
 
+// SL DLSS-D (Ray Reconstruction)
+
+void StreamlineHooks::unhookDlssd()
+{
+    LOG_FUNC();
+
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (o_dlssd_slGetPluginFunction)
+    {
+        DetourDetach(&(PVOID&) o_dlssd_slGetPluginFunction, hkdlssd_slGetPluginFunction);
+        o_dlssd_slGetPluginFunction = nullptr;
+    }
+
+    DetourTransactionCommit();
+}
+
+void StreamlineHooks::hookDlssd(HMODULE slDlssd)
+{
+    LOG_FUNC();
+
+    if (!slDlssd)
+    {
+        LOG_WARN("Dlssd module in NULL");
+        return;
+    }
+
+    if (o_dlssd_slGetPluginFunction)
+        unhookDlssd();
+
+    o_dlssd_slGetPluginFunction =
+        reinterpret_cast<PFN_slGetPluginFunction>(KernelBaseProxy::GetProcAddress_()(slDlssd, "slGetPluginFunction"));
+
+    if (o_dlssd_slGetPluginFunction != nullptr)
+    {
+        LOG_TRACE("Hooking slGetPluginFunction in sl.dlss_d");
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+
+        DetourAttach(&(PVOID&) o_dlssd_slGetPluginFunction, hkdlssd_slGetPluginFunction);
+
+        DetourTransactionCommit();
+    }
+}
+
 // SL DLSSG
 
 void StreamlineHooks::unhookDlssg()
@@ -1832,6 +1920,8 @@ void StreamlineHooks::hookCommon(HMODULE slCommon)
 bool StreamlineHooks::isInterposerHooked() { return o_slInit != nullptr || o_slInit_sl1 != nullptr; }
 
 bool StreamlineHooks::isDlssHooked() { return o_dlss_slGetPluginFunction != nullptr; }
+
+bool StreamlineHooks::isDlssdHooked() { return o_dlssd_slGetPluginFunction != nullptr; }
 
 bool StreamlineHooks::isDlssgHooked() { return o_dlssg_slGetPluginFunction != nullptr; }
 

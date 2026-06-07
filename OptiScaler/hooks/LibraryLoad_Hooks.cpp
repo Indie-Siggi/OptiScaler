@@ -177,6 +177,24 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
         return dlssModule;
     }
 
+    // sl.dlss_d.dll (Ray Reconstruction)
+    if (shouldHookSl && (CheckDllNameW(&libName, &slDlssdNamesW) ||
+                         (normalizedPath.contains(L"\\versions\\") && normalizedPath.contains(L"\\sl_dlss_d_"))))
+    {
+        auto dlssdModule = NtdllProxy::LoadLibraryExW_Ldr(lpLibFullPath, NULL, 0);
+
+        if (dlssdModule != nullptr)
+        {
+            StreamlineHooks::hookDlssd(dlssdModule);
+        }
+        else
+        {
+            LOG_ERROR("Trying to load dll as sl.dlss_d: {}", libNameA);
+        }
+
+        return dlssdModule;
+    }
+
     // sl.dlss_g.dll
     if ((CheckDllNameW(&libName, &slDlssgNamesW) ||
          (normalizedPath.contains(L"\\versions\\") && normalizedPath.contains(L"\\sl_dlss_g_"))))
@@ -914,6 +932,16 @@ void LibraryLoadHooks::CheckModulesInMemory()
         {
             LOG_DEBUG("sl.dlss.dll already in memory");
             StreamlineHooks::hookDlss(slDlss);
+        }
+    }
+
+    if (!StreamlineHooks::isDlssdHooked())
+    {
+        HMODULE slDlssd = GetDllNameWModule(&slDlssdNamesW);
+        if (slDlssd != nullptr)
+        {
+            LOG_DEBUG("sl.dlss_d.dll already in memory");
+            StreamlineHooks::hookDlssd(slDlssd);
         }
     }
 

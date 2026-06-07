@@ -908,6 +908,11 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetFeatureRequirements(
         Nvngx_FG::InitDLSSGMod_Dx12();
 
     if (FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling ||
+        // Ray Reconstruction: advertise unconditionally (like SuperSampling) so the game offers RR. The
+        // DLSS-D Streamline plugin queries this very early -- before our GPU/device detection runs and sets
+        // rayRegenCapable -- so it must NOT be gated on rayRegenCapable (it would be false and the plugin
+        // caches "DLSSDContext not available"). We serve RR via the FFX-MLD RayRegenFeatureDx12.
+        FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_RayReconstruction ||
         (FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_FrameGeneration &&
          ((Nvngx_FG::isDx12Available() && (Config::Instance()->FGInput == FGInput::NvngxFG ||
                                            Config::Instance()->FGOutput == FGOutput::DLSSGWithNvngx)) ||

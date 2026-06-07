@@ -792,8 +792,13 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams)
             InParams->Set("SuperSamplingDenoising.MinDriverVersionMinor", 0);
         }
 
-        InParams->Set("SuperSamplingDenoising.Available", 0);
-        InParams->Set("SuperSamplingDenoising.FeatureInitResult", 0);
+        // Advertise DLSS-D / Ray Reconstruction (NGX name "SuperSamplingDenoising") as available so the game
+        // offers the RR toggle on non-NVIDIA; we serve it via the FFX-MLD RayRegenFeatureDx12 (Upscaler::DLSSD).
+        // Without this the sl.dlss_d plugin reads SuperSamplingDenoising.Available==0 at slOnPluginStartup and
+        // reports "DLSSDContext is not available". Not gated on rayRegenCapable: this is queried before our GPU
+        // detection runs, mirroring the unconditional SuperSampling.Available=1 above.
+        InParams->Set("SuperSamplingDenoising.Available", 1);
+        InParams->Set("SuperSamplingDenoising.FeatureInitResult", 1); // NVSDK_NGX_Result_Success
     }
 
     // not ideal as it doesn't take different APIs into account
