@@ -19,9 +19,15 @@ class RR_Dx12 : public Shader_Dx12
   private:
     FrameDescriptorHeap _frameHeaps[RR_NUM_OF_HEAPS];
 
-    // u0..u6 in shader order.
+    // u0..u7 in shader order.
     ID3D12Resource* _outputs[RR_NUM_OUTPUTS] = {};
     D3D12_RESOURCE_STATES _outputStates[RR_NUM_OUTPUTS] = {};
+
+    // Debug sample buffer (u8): the shader writes a few converted values here; we copy it to a readback
+    // buffer and log the numbers (raw/linear depth, normal, motion, fused albedo, sky mask). Diagnostic only.
+    ID3D12Resource* _debugBuffer = nullptr;     // DEFAULT heap, RWBuffer<float4>
+    ID3D12Resource* _debugReadback = nullptr;   // READBACK heap, mapped for CPU logging
+    D3D12_RESOURCE_STATES _debugState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
     uint32_t _width = 0;
     uint32_t _height = 0;
@@ -48,6 +54,10 @@ class RR_Dx12 : public Shader_Dx12
     ID3D12Resource* SpecularAlbedo() { return _outputs[5]; }
     ID3D12Resource* DiffuseAlbedo() { return _outputs[6]; }
     ID3D12Resource* SkipSignal() { return _outputs[7]; }
+
+    // Map the debug readback buffer and LOG_INFO the sampled conversion values. Call after a Dispatch
+    // whose constants had DebugCapture = 1 (reads the most recent completed copy).
+    void LogDebugSamples();
 
     bool CanRender() const { return _init && _outputs[0] != nullptr; }
 

@@ -271,6 +271,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             RrReversedZ.set_from_config(readBool("RayRegen", "ReversedZ"));
             RrSkyThreshold.set_from_config(readFloat("RayRegen", "SkyThreshold"));
             RrDebugView.set_from_config(readInt("RayRegen", "DebugView"));
+            RrDebugLog.set_from_config(readBool("RayRegen", "DebugLog"));
 
             if (auto setting = readInt("FSR", "Fsr4Model"); setting.has_value() && setting >= 0 && setting <= 5)
                 Fsr4Model.set_from_config(setting);
@@ -1040,6 +1041,7 @@ bool Config::SaveIni()
         ini.SetValue("RayRegen", "ReversedZ", GetBoolValue(Instance()->RrReversedZ.value_for_config()).c_str());
         ini.SetValue("RayRegen", "SkyThreshold", GetFloatValue(Instance()->RrSkyThreshold.value_for_config()).c_str());
         ini.SetValue("RayRegen", "DebugView", GetIntValue(Instance()->RrDebugView.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "DebugLog", GetBoolValue(Instance()->RrDebugLog.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());

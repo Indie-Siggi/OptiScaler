@@ -160,9 +160,15 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // denoiser falls back to motion-vector-only reprojection. TODO(Phase 5): recover the view matrix.
     float camNear = 0.0f, camFar = 0.0f, camFov = 0.0f, frameTimeMs = 0.0f;
 
-    if (InParameters->Get(OptiKeys::FSR_NearPlane, &camNear) != NVSDK_NGX_Result_Success || camNear <= 0.0f)
+    // Track whether the camera planes came from NGX or our fallback default: if Cyberpunk does not populate
+    // FSR.cameraNear/Far we run on 0.1/10000, which mis-scales depth and over-blurs. Logged below (debug).
+    bool nearFromNgx = (InParameters->Get(OptiKeys::FSR_NearPlane, &camNear) == NVSDK_NGX_Result_Success &&
+                        camNear > 0.0f);
+    if (!nearFromNgx)
         camNear = 0.1f;
-    if (InParameters->Get(OptiKeys::FSR_FarPlane, &camFar) != NVSDK_NGX_Result_Success || camFar <= 0.0f)
+    bool farFromNgx = (InParameters->Get(OptiKeys::FSR_FarPlane, &camFar) == NVSDK_NGX_Result_Success &&
+                       camFar > 0.0f);
+    if (!farFromNgx)
         camFar = 10000.0f;
     if (InParameters->Get(OptiKeys::FSR_CameraFovVertical, &camFov) != NVSDK_NGX_Result_Success || camFov <= 0.0f)
         camFov = 1.047198f; // 60 degrees in radians
@@ -237,6 +243,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.DemodulateRadiance = _profile.demodulateRadiance ? 1u : 0u;
     rrc.InputMask = inputMask;
     rrc.SkyThreshold = _profile.skyThreshold;
+    rrc.DebugCapture = _profile.debugLog ? 1u : 0u;
 
     if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb))
     {
@@ -298,6 +305,18 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     {
         LOG_ERROR("RR resolve dispatch failed");
         return false;
+    }
+
+    // Periodic diagnostic logging (RrDebugLog). CPU-side context (the camera-plane source is the prime
+    // over-blur suspect) + the GPU-sampled conversion values from the readback buffer.
+    if (_profile.debugLog && (_frameCount % 120 == 0))
+    {
+        LOG_INFO("RR-debug ctx: frame={0} render={1}x{2} inputMask=0x{3:x} camNear={4:.4f}({5}) "
+                 "camFar={6:.1f}({7}) fovV={8:.4f} debugView={9} skyThreshold={10:.4f} reversedZ={11} demod={12}",
+                 _frameCount, _renderWidth, _renderHeight, inputMask, camNear, nearFromNgx ? "ngx" : "default",
+                 camFar, farFromNgx ? "ngx" : "default", camFov, debugView, _profile.skyThreshold,
+                 _profile.reversedZ, _profile.demodulateRadiance);
+        _convert->LogDebugSamples();
     }
 
     _frameCount++;

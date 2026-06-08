@@ -25,7 +25,13 @@ struct alignas(256) RRConstants
     uint32_t InputMask;          // RR_INPUT_HAS_* bits; missing inputs use neutral defaults
     uint32_t ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far), e.g. Cyberpunk
     float SkyThreshold;          // viewZ >= FarPlane * SkyThreshold marks a sky pixel for the skip-signal
+    uint32_t DebugCapture;       // 1 = sample 2 pixels (centre + sky) into OutDebug for CPU readback/logging
 };
+
+// OutDebug layout: 2 sample pixels x 4 float4 each (centre at base 0, sky at base 4):
+//   [0] (pixelX, pixelY, rawDeviceDepth, viewZ)   [1] (normal.xyz, roughness)
+//   [2] (outMV.xy, fusedAlbedo.r, skyMask)        [3] (radiance.rgb, clampedLinearDepth)
+#define RR_DEBUG_FLOAT4_COUNT 8
 
 // HLSL converter. Runtime-compiled as cs_5_0 when UsePrecompiledShaders=false; otherwise the
 // precompiled RR_cso (precompiled/RR_Shader.h, generated via shader_tools/dxc) is used.
@@ -48,6 +54,7 @@ cbuffer Params : register(b0)
     uint  InputMask;          // bit0 MV, bit1 normals, bit2 diffuseAlbedo, bit3 specularAlbedo
     uint  ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far)
     float SkyThreshold;       // viewZ >= FarPlane * SkyThreshold marks a sky pixel
+    uint  DebugCapture;       // 1 = write the centre + sky sample into OutDebug
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -65,6 +72,7 @@ RWTexture2D<float4> OutNormals        : register(u4); // RG octahedral, B roughn
 RWTexture2D<float4> OutSpecularAlbedo : register(u5);
 RWTexture2D<float4> OutDiffuseAlbedo  : register(u6);
 RWTexture2D<float4> OutSkipSignal     : register(u7); // RGB original colour, A sky mask (1 = sky); for recomposition
+RWStructuredBuffer<float4> OutDebug   : register(u8); // CPU-readback sample buffer (see RR_DEBUG_FLOAT4_COUNT)
 
 float2 SignNotZero(float2 v)
 {
@@ -142,5 +150,24 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     if (DemodulateRadiance != 0)
         radiance = radiance / max(fused, 1e-4);
     OutRadiance[tid.xy] = float4(radiance, 0.0);
+
+    // Debug capture: the threads at the centre and a near-top (sky) pixel write their input + output
+    // values into OutDebug for the CPU to read back and log. Lets us see the actual converted numbers
+    // (raw vs linear depth, normal, motion, fused albedo, sky mask) without RenderDoc.
+    if (DebugCapture != 0u)
+    {
+        uint base = 0xffffffffu;
+        if (tid.x == RenderWidth / 2u && tid.y == RenderHeight / 2u)
+            base = 0u; // screen centre
+        else if (tid.x == RenderWidth / 2u && tid.y == RenderHeight / 20u)
+            base = 4u; // near top -> usually sky
+        if (base != 0xffffffffu)
+        {
+            OutDebug[base + 0u] = float4((float) tid.x, (float) tid.y, dd, viewZ);
+            OutDebug[base + 1u] = float4(n, roughness);
+            OutDebug[base + 2u] = float4(mv.x * MotionScaleX, mv.y * MotionScaleY, fused.r, skyMask);
+            OutDebug[base + 3u] = float4(radiance, clamp(viewZ, NearPlane, FarPlane));
+        }
+    }
 }
 )";

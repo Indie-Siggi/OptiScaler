@@ -433,6 +433,7 @@ class Config
     CustomOptional<float> RrSkyThreshold { 0.999f };  // viewZ >= FarPlane * this marks a sky pixel (skip-signal)
     CustomOptional<int> RrDebugView { 0 };            // 0 = normal; 1 depth, 2 normals, 3 roughness, 4 MV,
                                                       // 5 fusedAlbedo, 6 radiance, 7 skyMask, 8 denoised
+    CustomOptional<bool> RrDebugLog { false };        // periodically log sampled converted values to OptiScaler.log
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };
