@@ -17,11 +17,12 @@ constexpr DXGI_FORMAT kOutputFormats[RR_NUM_OUTPUTS] = {
     DXGI_FORMAT_R16G16B16A16_FLOAT, // u4 normals
     DXGI_FORMAT_R16G16B16A16_FLOAT, // u5 specularAlbedo
     DXGI_FORMAT_R16G16B16A16_FLOAT, // u6 diffuseAlbedo
+    DXGI_FORMAT_R16G16B16A16_FLOAT, // u7 skipSignal (RGB original colour, A sky mask)
 };
 
 constexpr const wchar_t* kOutputNames[RR_NUM_OUTPUTS] = {
-    L"RR_Radiance", L"RR_FusedAlbedo", L"RR_LinearDepth", L"RR_MotionVectors",
-    L"RR_Normals",  L"RR_SpecularAlbedo", L"RR_DiffuseAlbedo",
+    L"RR_Radiance",      L"RR_FusedAlbedo",    L"RR_LinearDepth", L"RR_MotionVectors",
+    L"RR_Normals",       L"RR_SpecularAlbedo", L"RR_DiffuseAlbedo", L"RR_SkipSignal",
 };
 } // namespace
 

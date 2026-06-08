@@ -111,6 +111,13 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
         return false;
     }
 
+    _resolve = std::make_unique<RR_Resolve_Dx12>("RayRegenResolve", Device);
+    if (_resolve == nullptr || !_resolve->IsInit())
+    {
+        LOG_ERROR("Failed to create the RR resolve/recomposition shader");
+        return false;
+    }
+
     _resetHistory = true;
     SetInit(true);
     return true;
@@ -209,6 +216,14 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
         return false;
     }
 
+    // Lazily allocate the resolve pass's denoised intermediate (the MLD denoiser writes here, then the
+    // resolve pass recomposes the sky / debug-visualizes into the app output).
+    if (!_resolve->CanRender() && !_resolve->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
+    {
+        LOG_ERROR("Failed to allocate the resolve intermediate buffer");
+        return false;
+    }
+
     // Convert the NGX-RR buffers into the MLD 1-signal inputs.
     RRConstants rrc {};
     rrc.RenderWidth = _renderWidth;
@@ -221,6 +236,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.NormalsArePacked = _profile.normalsArePacked ? 1u : 0u;
     rrc.DemodulateRadiance = _profile.demodulateRadiance ? 1u : 0u;
     rrc.InputMask = inputMask;
+    rrc.SkyThreshold = _profile.skyThreshold;
 
     if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb))
     {
@@ -241,20 +257,46 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     dispatchDesc.specularAlbedo = ffxApiGetResourceDX12(_convert->SpecularAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
     dispatchDesc.diffuseAlbedo = ffxApiGetResourceDX12(_convert->DiffuseAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
 
-    // 1-signal radiance: noisy radiance in (from converter) -> denoised out (app output target).
-    ffxDispatchDescDenoiserInput1Signal sig = { 0 };
-    sig.header.type = FFX_API_DISPATCH_DESC_INPUT_1_SIGNAL_TYPE_DENOISER;
-    sig.radiance.input = ffxApiGetResourceDX12(_convert->Radiance(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
-    sig.radiance.output = ffxApiGetResourceDX12(inOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
-    sig.fusedAlbedo = ffxApiGetResourceDX12(_convert->FusedAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    // Debug visualization (DebugView != 0) routes a converted signal straight to the output and skips
+    // the denoiser, so we can ground-truth the conversion in-game. Normal path runs the denoiser into the
+    // resolve pass's intermediate, then recomposes the sky from the skip-signal.
+    const uint32_t debugView = _profile.debugView;
 
-    dispatchDesc.header.pNext = &sig.header;
-
-    auto ret = FfxApiProxy::D3D12_Dispatch(&_denoiserContext, &dispatchDesc.header);
-
-    if (ret != FFX_API_RETURN_OK)
+    if (debugView == 0)
     {
-        LOG_ERROR("D3D12_Dispatch (denoiser) error: {0}", FfxApiProxy::ReturnCodeToString(ret));
+        // 1-signal radiance: noisy radiance in (from converter) -> denoised out (resolve intermediate).
+        _resolve->PrepareForDenoiser(InCommandList);
+
+        ffxDispatchDescDenoiserInput1Signal sig = { 0 };
+        sig.header.type = FFX_API_DISPATCH_DESC_INPUT_1_SIGNAL_TYPE_DENOISER;
+        sig.radiance.input = ffxApiGetResourceDX12(_convert->Radiance(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        sig.radiance.output = ffxApiGetResourceDX12(_resolve->Denoised(), FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+        sig.fusedAlbedo = ffxApiGetResourceDX12(_convert->FusedAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+
+        dispatchDesc.header.pNext = &sig.header;
+
+        auto ret = FfxApiProxy::D3D12_Dispatch(&_denoiserContext, &dispatchDesc.header);
+
+        if (ret != FFX_API_RETURN_OK)
+        {
+            LOG_ERROR("D3D12_Dispatch (denoiser) error: {0}", FfxApiProxy::ReturnCodeToString(ret));
+            return false;
+        }
+    }
+
+    // Resolve: recompose the sky over the denoised result (DebugView 0), or write a debug view.
+    RRResolveConstants rrr {};
+    rrr.RenderWidth = _renderWidth;
+    rrr.RenderHeight = _renderHeight;
+    rrr.DebugView = debugView;
+    rrr.NearPlane = camNear;
+    rrr.FarPlane = camFar;
+
+    if (!_resolve->Dispatch(InCommandList, rrr, _convert->SkipSignal(), _convert->Radiance(),
+                            _convert->LinearDepth(), _convert->MotionVectors(), _convert->Normals(),
+                            _convert->FusedAlbedo(), inOutput))
+    {
+        LOG_ERROR("RR resolve dispatch failed");
         return false;
     }
 

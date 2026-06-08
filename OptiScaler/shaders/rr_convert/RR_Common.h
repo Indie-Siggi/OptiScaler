@@ -24,6 +24,7 @@ struct alignas(256) RRConstants
     uint32_t DemodulateRadiance; // 1 to divide the noisy colour by fused albedo (per-game; tune in-game)
     uint32_t InputMask;          // RR_INPUT_HAS_* bits; missing inputs use neutral defaults
     uint32_t ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far), e.g. Cyberpunk
+    float SkyThreshold;          // viewZ >= FarPlane * SkyThreshold marks a sky pixel for the skip-signal
 };
 
 // HLSL converter. Runtime-compiled as cs_5_0 when UsePrecompiledShaders=false; otherwise the
@@ -46,6 +47,7 @@ cbuffer Params : register(b0)
     uint  DemodulateRadiance;
     uint  InputMask;          // bit0 MV, bit1 normals, bit2 diffuseAlbedo, bit3 specularAlbedo
     uint  ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far)
+    float SkyThreshold;       // viewZ >= FarPlane * SkyThreshold marks a sky pixel
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -62,6 +64,7 @@ RWTexture2D<float4> OutMotionVectors  : register(u3); // RG UV motion, B depth d
 RWTexture2D<float4> OutNormals        : register(u4); // RG octahedral, B roughness, A material
 RWTexture2D<float4> OutSpecularAlbedo : register(u5);
 RWTexture2D<float4> OutDiffuseAlbedo  : register(u6);
+RWTexture2D<float4> OutSkipSignal     : register(u7); // RGB original colour, A sky mask (1 = sky); for recomposition
 
 float2 SignNotZero(float2 v)
 {
@@ -96,6 +99,15 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float viewZ = (NearPlane * FarPlane) / max(denom, 1e-6);
     OutLinearDepth[tid.xy] = clamp(viewZ, NearPlane, FarPlane);
 
+    float3 color = InColor.Load(p).rgb;
+
+    // Sky / far-plane skip-signal for the post-denoise recomposition pass. The MLD denoiser zeroes
+    // far-plane (sky) pixels even with finite depth + neutral albedo (the persistent black sky), so flag
+    // sky pixels here and carry the original colour; the resolve pass lerps it back over the denoised
+    // result. Reproduces the DarkHelmet oracle's skip-signal sky bypass. See RR_BUILD_DEPLOY.md.
+    float skyMask = (viewZ >= FarPlane * SkyThreshold) ? 1.0 : 0.0;
+    OutSkipSignal[tid.xy] = float4(color, skyMask);
+
     // Motion vectors -> UV space (PreviousUV - CurrentUV). B = depth delta (needs history; 0 for now).
     // Missing (bit0 clear) -> zero motion (denoiser treats the pixel as static).
     float2 mv = (InputMask & 1u) ? InMotionVectors.Load(p).xy : float2(0.0, 0.0);
@@ -126,9 +138,9 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     OutFusedAlbedo[tid.xy] = float4(fused, 1.0);
 
     // Radiance (noisy). Optional per-game demodulation by fused albedo (tune in-game).
-    float3 color = InColor.Load(p).rgb;
+    float3 radiance = color;
     if (DemodulateRadiance != 0)
-        color = color / max(fused, 1e-4);
-    OutRadiance[tid.xy] = float4(color, 0.0);
+        radiance = radiance / max(fused, 1e-4);
+    OutRadiance[tid.xy] = float4(radiance, 0.0);
 }
 )";

@@ -311,6 +311,12 @@
     <ClInclude Include="shaders\rr_convert\RR_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="shaders\rr_convert\RR_Resolve_Common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="shaders\rr_convert\RR_Resolve_Dx12.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shaders\depth_scale\precompiled\DS_Shader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1083,6 +1089,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="shaders\rr_convert\RR_Dx12.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="shaders\rr_convert\RR_Resolve_Dx12.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="misc\FrameLimit.cpp">

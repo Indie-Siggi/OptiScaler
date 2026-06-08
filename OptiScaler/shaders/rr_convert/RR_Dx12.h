@@ -9,9 +9,9 @@
 #include "RR_Common.h"
 
 #define RR_NUM_OF_HEAPS 2
-#define RR_NUM_OUTPUTS 7
+#define RR_NUM_OUTPUTS 8
 
-// NGX Ray-Reconstruction -> FFX-MLD 1-signal input conversion (6 SRV inputs -> 7 UAV outputs).
+// NGX Ray-Reconstruction -> FFX-MLD 1-signal input conversion (6 SRV inputs -> 8 UAV outputs).
 // The 7 outputs are the MLD dispatch inputs; the denoised result is written by MLD to the app's
 // output target, not here. See RayRegenFeature_Dx12 + OPTISCALER_RR_PLAN.md "Path B".
 class RR_Dx12 : public Shader_Dx12
@@ -47,6 +47,7 @@ class RR_Dx12 : public Shader_Dx12
     ID3D12Resource* Normals() { return _outputs[4]; }
     ID3D12Resource* SpecularAlbedo() { return _outputs[5]; }
     ID3D12Resource* DiffuseAlbedo() { return _outputs[6]; }
+    ID3D12Resource* SkipSignal() { return _outputs[7]; }
 
     bool CanRender() const { return _init && _outputs[0] != nullptr; }
 

@@ -23,6 +23,8 @@ struct RRGameProfile
     bool normalsArePacked = true;
     bool demodulateRadiance = false;
     bool reversedZ = true; // device depth is reversed-Z (1=near, 0=far); Cyberpunk and most modern engines
+    float skyThreshold = 0.999f; // viewZ >= FarPlane * this marks a sky pixel for the skip-signal bypass
+    uint32_t debugView = 0; // 0 = normal (recompose); 1..8 = visualize a converted signal (see RR_Resolve_Common.h)
 };
 
 // Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].

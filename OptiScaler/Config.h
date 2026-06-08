@@ -429,6 +429,10 @@ class Config
     CustomOptional<float> RrMotionScaleY { 1.0f };
     CustomOptional<bool> RrNormalsArePacked { true }; // normals stored as n * 0.5 + 0.5
     CustomOptional<bool> RrDemodulateRadiance { false }; // divide noisy colour by fused albedo
+    CustomOptional<bool> RrReversedZ { true };        // device depth is reversed-Z (1=near, 0=far)
+    CustomOptional<float> RrSkyThreshold { 0.999f };  // viewZ >= FarPlane * this marks a sky pixel (skip-signal)
+    CustomOptional<int> RrDebugView { 0 };            // 0 = normal; 1 depth, 2 normals, 3 roughness, 4 MV,
+                                                      // 5 fusedAlbedo, 6 radiance, 7 skyMask, 8 denoised
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };

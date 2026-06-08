@@ -15,6 +15,7 @@
 #include "ffx_denoiser.h" // vendored: ffxCreateContextDescDenoiser / ffxDispatchDescDenoiserInput1Signal (C API)
 #include <upscalers/IFeature_Dx12.h>
 #include <shaders/rr_convert/RR_Dx12.h>
+#include <shaders/rr_convert/RR_Resolve_Dx12.h>
 #include "RRGameProfile.h"
 #include <memory>
 
@@ -35,8 +36,13 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
                                  FFX_DENOISER_VERSION_PATCH };
 
     // NGX-RR -> MLD input conversion (linearize depth, octahedral normals, fused albedo, UV
-    // motion vectors, radiance). Produces the 7 MLD dispatch inputs. See shaders/rr_convert.
+    // motion vectors, radiance, sky skip-signal). Produces the 8 MLD dispatch inputs. See shaders/rr_convert.
     std::unique_ptr<RR_Dx12> _convert;
+
+    // Post-denoise resolve: recompose the sky from the skip-signal (the denoiser zeroes far pixels),
+    // and/or write a debug visualization of a converted signal. Owns the denoised intermediate the
+    // MLD denoiser writes into. See shaders/rr_convert/RR_Resolve_Dx12.
+    std::unique_ptr<RR_Resolve_Dx12> _resolve;
 
     bool CreateDenoiserContext(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters);
     void ReleaseDenoiserContext();
