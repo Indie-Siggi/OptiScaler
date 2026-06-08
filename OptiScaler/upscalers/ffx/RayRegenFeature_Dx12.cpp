@@ -1,6 +1,7 @@
 #include <pch.h>
 #include <Config.h>
 #include <Util.h>
+#include <NVNGX_Parameter.h>
 #include <proxies/FfxApi_Proxy.h>
 #include "RayRegenFeature_Dx12.h"
 
@@ -317,6 +318,31 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
                  camFar, farFromNgx ? "ngx" : "default", camFov, debugView, _profile.skyThreshold,
                  _profile.reversedZ, _profile.demodulateRadiance);
         _convert->LogDebugSamples();
+    }
+
+    // Full NGX parameter dump (coarser cadence). DLSS-RR's contract (NVIDIA vk_denoise_dlssrr) requires
+    // diffuse+specular albedo and passes the camera as WorldToView + ViewToClip matrices (the projection
+    // encodes the real near/far). We get inputMask=0x3 + default camera planes, so Cyberpunk sets those
+    // under keys we do not read. OptiScaler's param object stores every key the game Set -> enumerate and
+    // dump them all to find the matrix + albedo + hit-distance keys. Interpret by name + which probe hits:
+    // res!=0 only = texture; res!=0 && ptr!=0 = CPU pointer (e.g. a matrix's float*); else scalar (ull/f).
+    if (_profile.debugLog && (_frameCount % 600 == 0))
+    {
+        auto* p = static_cast<NVNGX_Parameters*>(InParameters);
+        auto keys = p->enumerate();
+        LOG_INFO("RR-debug NGX param dump (frame {0}, {1} keys):", _frameCount, keys.size());
+        for (const auto& k : keys)
+        {
+            ID3D12Resource* res = nullptr;
+            void* vp = nullptr;
+            unsigned long long u = 0;
+            float f = 0.0f;
+            p->Get(k.c_str(), &res);
+            p->Get(k.c_str(), &vp);
+            p->Get(k.c_str(), &u);
+            p->Get(k.c_str(), &f);
+            LOG_INFO("  NGX[{0}] res={1} ptr={2} ull={3} f={4:.4f}", k, (void*) res, vp, u, f);
+        }
     }
 
     _frameCount++;
