@@ -105,13 +105,14 @@ void RR_Dx12::TransitionOutputs(ID3D12GraphicsCommandList* InCmdList, D3D12_RESO
 
 bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& InConstants, ID3D12Resource* InColor,
                        ID3D12Resource* InDepth, ID3D12Resource* InMotionVectors, ID3D12Resource* InNormalRoughness,
-                       ID3D12Resource* InDiffuseAlbedo, ID3D12Resource* InSpecularAlbedo)
+                       ID3D12Resource* InDiffuseAlbedo, ID3D12Resource* InSpecularAlbedo,
+                       ID3D12Resource* InSpecularHitDistance)
 {
     if (!_init || _device == nullptr || InCmdList == nullptr || !CanRender())
         return false;
 
     if (InColor == nullptr || InDepth == nullptr || InMotionVectors == nullptr || InNormalRoughness == nullptr ||
-        InDiffuseAlbedo == nullptr || InSpecularAlbedo == nullptr)
+        InDiffuseAlbedo == nullptr || InSpecularAlbedo == nullptr || InSpecularHitDistance == nullptr)
     {
         LOG_ERROR("[{0}] missing input resource", _name);
         return false;
@@ -123,13 +124,14 @@ bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& 
     _counter = (_counter + 1) % RR_NUM_OF_HEAPS;
     FrameDescriptorHeap& heap = _frameHeaps[_counter];
 
-    // SRVs t0..t5
+    // SRVs t0..t6
     CreateShaderResourceView(_device, InColor, heap.GetSrvCPU(0));
     CreateShaderResourceView(_device, InDepth, heap.GetSrvCPU(1));
     CreateShaderResourceView(_device, InMotionVectors, heap.GetSrvCPU(2));
     CreateShaderResourceView(_device, InNormalRoughness, heap.GetSrvCPU(3));
     CreateShaderResourceView(_device, InDiffuseAlbedo, heap.GetSrvCPU(4));
     CreateShaderResourceView(_device, InSpecularAlbedo, heap.GetSrvCPU(5));
+    CreateShaderResourceView(_device, InSpecularHitDistance, heap.GetSrvCPU(6));
 
     // UAVs u0..u7 (image outputs)
     for (int i = 0; i < RR_NUM_OUTPUTS; i++)
@@ -220,8 +222,8 @@ RR_Dx12::RR_Dx12(std::string InName, ID3D12Device* InDevice) : Shader_Dx12(InNam
 
     LOG_DEBUG("{0} start!", _name);
 
-    // 6 SRVs, RR_NUM_OUTPUTS image UAVs + 1 debug buffer UAV (u8), 1 CBV.
-    if (!SetupRootSignature(InDevice, 6, RR_NUM_OUTPUTS + 1, 1))
+    // 7 SRVs (+ spec hit distance), RR_NUM_OUTPUTS image UAVs + 1 debug buffer UAV (u8), 1 CBV.
+    if (!SetupRootSignature(InDevice, 7, RR_NUM_OUTPUTS + 1, 1))
     {
         LOG_ERROR("Failed to setup root signature");
         return;

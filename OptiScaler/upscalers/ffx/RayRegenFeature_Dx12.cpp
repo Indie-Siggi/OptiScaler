@@ -1,4 +1,5 @@
 #include <pch.h>
+#include <cmath>
 #include <Config.h>
 #include <Util.h>
 #include <NVNGX_Parameter.h>
@@ -177,6 +178,43 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
         frameTimeMs < 1.0f)
         frameTimeMs = 16.7f;
 
+    // Camera matrices (DLSS-RR contract): Cyberpunk passes WorldToView + ViewToClip; the projection encodes
+    // the real near/far/fov. Derive the depth linearization coefficients + real near/far/fov from it (replaces
+    // the guessed 0.1/10000). Row-major, left-multiply (NVIDIA convention): clip.z = vz*M[2][2] + M[3][2],
+    // clip.w = vz*M[2][3] + M[3][3]  ->  viewZ = (B - dd*D) / (dd*C - A).
+    float depthMatA = 0.0f, depthMatB = 0.0f, depthMatC = 0.0f, depthMatD = 0.0f;
+    uint32_t hasDepthMatrix = 0;
+    void* viewToClipPtr = nullptr;
+    if (InParameters->Get("ViewToClipMatrix", &viewToClipPtr) == NVSDK_NGX_Result_Success && viewToClipPtr != nullptr)
+    {
+        const float* m = reinterpret_cast<const float*>(viewToClipPtr);
+        depthMatA = m[10]; // M[2][2]
+        depthMatB = m[14]; // M[3][2]
+        depthMatC = m[11]; // M[2][3]
+        depthMatD = m[15]; // M[3][3]
+        hasDepthMatrix = 1;
+
+        auto viewZ = [&](float dd)
+        {
+            float den = dd * depthMatC - depthMatA;
+            return (depthMatB - dd * depthMatD) / ((std::fabs(den) > 1e-9f) ? den : 1e-9f);
+        };
+        float vz0 = std::fabs(viewZ(0.0f)); // device 0 = far plane (reversed-Z)
+        float vz1 = std::fabs(viewZ(1.0f)); // device 1 = near plane (reversed-Z)
+        float nearV = (vz0 < vz1) ? vz0 : vz1;
+        float farV = (vz0 > vz1) ? vz0 : vz1;
+        if (nearV < 1e-3f)
+            nearV = 1e-3f;
+        if (!(farV > nearV) || farV > 1.0e6f)
+            farV = 1.0e6f; // guard infinite-far / NaN
+        camNear = nearV;
+        camFar = farV;
+
+        float m11 = std::fabs(m[5]); // M[1][1] = 1/tan(fovY/2)
+        if (m11 > 1e-6f)
+            camFov = 2.0f * std::atan(1.0f / m11);
+    }
+
     dispatchDesc.cameraNear = camNear;
     dispatchDesc.cameraFar = camFar;
     dispatchDesc.cameraFovAngleVertical = camFov;
@@ -189,8 +227,11 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     ID3D12Resource* inDepth = nullptr;   InParameters->Get(NVSDK_NGX_Parameter_Depth, &inDepth);
     ID3D12Resource* inMv = nullptr;      InParameters->Get(NVSDK_NGX_Parameter_MotionVectors, &inMv);
     ID3D12Resource* inNormals = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_Normals, &inNormals);
-    ID3D12Resource* inDiffAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_DiffuseAlbedo, &inDiffAlb);
-    ID3D12Resource* inSpecAlb = nullptr; InParameters->Get(NVSDK_NGX_Parameter_GBuffer_SpecularAlbedo, &inSpecAlb);
+    // Cyberpunk sets albedo + specular hit distance under the DLSS-RR eval keys, not the GBuffer.* ones
+    // (confirmed via the NGX param dump). DLSS-RR requires diffuse+specular albedo; hit distance is optional.
+    ID3D12Resource* inDiffAlb = nullptr; InParameters->Get("DLSS.Input.DiffuseAlbedo", &inDiffAlb);
+    ID3D12Resource* inSpecAlb = nullptr; InParameters->Get("DLSS.Input.SpecularAlbedo", &inSpecAlb);
+    ID3D12Resource* inSpecHit = nullptr; InParameters->Get("DLSSD.SpecularHitDistance", &inSpecHit);
 
     // Only colour/depth/output are mandatory. Missing optional GBuffer inputs degrade gracefully (Step 1):
     // their SRV is bound to a valid stand-in (colour) and the shader ignores it via InputMask, so an
@@ -206,15 +247,17 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     if (inNormals != nullptr) inputMask |= RR_INPUT_HAS_NORMALS;
     if (inDiffAlb != nullptr) inputMask |= RR_INPUT_HAS_DIFFUSE_ALBEDO;
     if (inSpecAlb != nullptr) inputMask |= RR_INPUT_HAS_SPECULAR_ALBEDO;
+    if (inSpecHit != nullptr) inputMask |= RR_INPUT_HAS_SPEC_HITDIST;
 
-    if (inputMask != RR_INPUT_ALL)
-        LOG_WARN("RR: missing optional GBuffer input(s) (mask 0x{0:x}); using neutral defaults", inputMask);
+    if ((inputMask & RR_INPUT_ALL) != RR_INPUT_ALL)
+        LOG_WARN("RR: missing core input(s) (mask 0x{0:x}); using neutral defaults", inputMask);
 
     // Bind a valid stand-in for any missing optional input; the shader ignores it via the mask.
     if (inMv == nullptr)      inMv = inColor;
     if (inNormals == nullptr) inNormals = inColor;
     if (inDiffAlb == nullptr) inDiffAlb = inColor;
     if (inSpecAlb == nullptr) inSpecAlb = inColor;
+    if (inSpecHit == nullptr) inSpecHit = inColor;
 
     // Lazily allocate the conversion output textures (render-res; heap props copied from color).
     if (!_convert->CanRender() && !_convert->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
@@ -245,8 +288,13 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.InputMask = inputMask;
     rrc.SkyThreshold = _profile.skyThreshold;
     rrc.DebugCapture = _profile.debugLog ? 1u : 0u;
+    rrc.DepthMatA = depthMatA;
+    rrc.DepthMatB = depthMatB;
+    rrc.DepthMatC = depthMatC;
+    rrc.DepthMatD = depthMatD;
+    rrc.HasDepthMatrix = hasDepthMatrix;
 
-    if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb))
+    if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb, inSpecHit))
     {
         LOG_ERROR("NGX-RR -> MLD conversion dispatch failed");
         return false;
@@ -312,11 +360,14 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // over-blur suspect) + the GPU-sampled conversion values from the readback buffer.
     if (_profile.debugLog && (_frameCount % 120 == 0))
     {
+        const char* nearSrc = hasDepthMatrix ? "mtx" : (nearFromNgx ? "ngx" : "default");
+        const char* farSrc = hasDepthMatrix ? "mtx" : (farFromNgx ? "ngx" : "default");
         LOG_INFO("RR-debug ctx: frame={0} render={1}x{2} inputMask=0x{3:x} camNear={4:.4f}({5}) "
                  "camFar={6:.1f}({7}) fovV={8:.4f} debugView={9} skyThreshold={10:.4f} reversedZ={11} demod={12}",
-                 _frameCount, _renderWidth, _renderHeight, inputMask, camNear, nearFromNgx ? "ngx" : "default",
-                 camFar, farFromNgx ? "ngx" : "default", camFov, debugView, _profile.skyThreshold,
-                 _profile.reversedZ, _profile.demodulateRadiance);
+                 _frameCount, _renderWidth, _renderHeight, inputMask, camNear, nearSrc, camFar, farSrc, camFov,
+                 debugView, _profile.skyThreshold, _profile.reversedZ, _profile.demodulateRadiance);
+        LOG_INFO("RR-debug depthMtx: has={0} A={1:.5f} B={2:.5f} C={3:.5f} D={4:.5f}", hasDepthMatrix, depthMatA,
+                 depthMatB, depthMatC, depthMatD);
         _convert->LogDebugSamples();
     }
 

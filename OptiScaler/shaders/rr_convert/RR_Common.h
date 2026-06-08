@@ -9,6 +9,7 @@
 #define RR_INPUT_HAS_DIFFUSE_ALBEDO  4u
 #define RR_INPUT_HAS_SPECULAR_ALBEDO 8u
 #define RR_INPUT_ALL                 15u
+#define RR_INPUT_HAS_SPEC_HITDIST    16u // optional: specular ray length -> OutRadiance.a
 
 // Constants for the NGX Ray-Reconstruction -> FFX-MLD input conversion shader.
 // Field order/layout must match the cbuffer in shaderCode below.
@@ -26,6 +27,13 @@ struct alignas(256) RRConstants
     uint32_t ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far), e.g. Cyberpunk
     float SkyThreshold;          // viewZ >= FarPlane * SkyThreshold marks a sky pixel for the skip-signal
     uint32_t DebugCapture;       // 1 = sample 2 pixels (centre + sky) into OutDebug for CPU readback/logging
+    // Matrix-derived depth: viewZ = (B - dd*D) / (dd*C - A), from the ViewToClipMatrix z/w mapping
+    // (A=M[2][2], B=M[3][2], C=M[2][3], D=M[3][3]). Convention-proof vs the guessed near/far closed form.
+    float DepthMatA;
+    float DepthMatB;
+    float DepthMatC;
+    float DepthMatD;
+    uint32_t HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = fall back to the near/far closed form
 };
 
 // OutDebug layout: 2 sample pixels x 4 float4 each (centre at base 0, sky at base 4):
@@ -55,6 +63,11 @@ cbuffer Params : register(b0)
     uint  ReversedZ;          // 1 if device depth is reversed-Z (1=near, 0=far)
     float SkyThreshold;       // viewZ >= FarPlane * SkyThreshold marks a sky pixel
     uint  DebugCapture;       // 1 = write the centre + sky sample into OutDebug
+    float DepthMatA;          // viewZ = (B - dd*D) / (dd*C - A) from the ViewToClip z/w mapping
+    float DepthMatB;
+    float DepthMatC;
+    float DepthMatD;
+    uint  HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = near/far closed form
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -63,6 +76,7 @@ Texture2D<float4> InMotionVectors   : register(t2);
 Texture2D<float4> InNormalRoughness : register(t3); // RGB normal, A linear roughness
 Texture2D<float4> InDiffuseAlbedo   : register(t4);
 Texture2D<float4> InSpecularAlbedo  : register(t5);
+Texture2D<float4> InSpecHitDist     : register(t6); // R specular ray length (hit distance)
 
 RWTexture2D<float4> OutRadiance       : register(u0); // RGB noisy radiance, A specular ray length
 RWTexture2D<float4> OutFusedAlbedo    : register(u1); // RGB max(spec,diff)
@@ -97,14 +111,24 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 
     int3 p = int3(tid.xy, 0);
 
-    // Device depth -> linear view-space depth (world units), clamped to [near, far].
-    // Convention-aware closed form (handles reversed-Z) and finite at the far plane (sky), so the sky no
-    // longer maps to 1/0 = Inf -> black. Reproduces the DarkHelmet oracle's clamp(viewZ, near, far) without
-    // needing the projection matrix. See RR_BUILD_DEPLOY.md "Oracle conventions".
+    // Device depth -> abs linear view-space depth, clamped to [near, far] (what FFX-MLD wants for linearDepth).
+    // Preferred: invert the real ViewToClip z/w mapping, viewZ = (B - dd*D)/(dd*C - A) (handles reversed-Z and
+    // infinite-far automatically; coefficients are the projection matrix Cyberpunk provides). Fallback: the old
+    // near/far closed form if no matrix was available. See RR_BUILD_DEPLOY.md + FFX ffx_denoiser.h.
     float dd = InDepth.Load(p);
-    float depthSpan = FarPlane - NearPlane;
-    float denom = (ReversedZ != 0u) ? (NearPlane + dd * depthSpan) : (FarPlane - dd * depthSpan);
-    float viewZ = (NearPlane * FarPlane) / max(denom, 1e-6);
+    float viewZ;
+    if (HasDepthMatrix != 0u)
+    {
+        float denomM = dd * DepthMatC - DepthMatA;
+        viewZ = (DepthMatB - dd * DepthMatD) / ((abs(denomM) > 1e-9) ? denomM : 1e-9);
+    }
+    else
+    {
+        float depthSpan = FarPlane - NearPlane;
+        float denom = (ReversedZ != 0u) ? (NearPlane + dd * depthSpan) : (FarPlane - dd * depthSpan);
+        viewZ = (NearPlane * FarPlane) / max(denom, 1e-6);
+    }
+    viewZ = abs(viewZ);
     OutLinearDepth[tid.xy] = clamp(viewZ, NearPlane, FarPlane);
 
     float3 color = InColor.Load(p).rgb;
@@ -145,11 +169,14 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float3 fused = ((InputMask & (4u | 8u)) != 0u) ? max(max(spec, diff), 0.01) : float3(1.0, 1.0, 1.0);
     OutFusedAlbedo[tid.xy] = float4(fused, 1.0);
 
-    // Radiance (noisy). Optional per-game demodulation by fused albedo (tune in-game).
+    // Radiance (noisy). FFX 1-signal wants RGB composited radiance + A = specular ray length (in-only),
+    // so feed the specular hit distance into .a (fixes the smeared reflections). Optional per-game demod
+    // by fused albedo (off by default: the denoiser demodulates internally with the real fusedAlbedo guide).
     float3 radiance = color;
     if (DemodulateRadiance != 0)
         radiance = radiance / max(fused, 1e-4);
-    OutRadiance[tid.xy] = float4(radiance, 0.0);
+    float specHitDist = (InputMask & 16u) ? InSpecHitDist.Load(p).r : 0.0;
+    OutRadiance[tid.xy] = float4(radiance, specHitDist);
 
     // Debug capture: the threads at the centre and a near-top (sky) pixel write their input + output
     // values into OutDebug for the CPU to read back and log. Lets us see the actual converted numbers

@@ -44,7 +44,8 @@ class RR_Dx12 : public Shader_Dx12
 
     bool Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& InConstants, ID3D12Resource* InColor,
                   ID3D12Resource* InDepth, ID3D12Resource* InMotionVectors, ID3D12Resource* InNormalRoughness,
-                  ID3D12Resource* InDiffuseAlbedo, ID3D12Resource* InSpecularAlbedo);
+                  ID3D12Resource* InDiffuseAlbedo, ID3D12Resource* InSpecularAlbedo,
+                  ID3D12Resource* InSpecularHitDistance);
 
     ID3D12Resource* Radiance() { return _outputs[0]; }
     ID3D12Resource* FusedAlbedo() { return _outputs[1]; }
