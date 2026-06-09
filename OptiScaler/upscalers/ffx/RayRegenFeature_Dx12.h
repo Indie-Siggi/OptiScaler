@@ -33,11 +33,6 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     bool _prevCamPosValid = false;
     bool _resetHistory = true;
 
-    // Last-applied values of the 6 [RayRegen] denoiser tuning floats (order: CrossBilateralNormalStrength,
-    // StabilityBias, MaxRadiance, RadianceClipStdK, GaussianKernelRelaxation, DisocclusionThreshold). -2 =
-    // never applied. Re-applied via ffxConfigure each frame only when the (live) Config value changes.
-    float _appliedTunables[6] = { -2.0f, -2.0f, -2.0f, -2.0f, -2.0f, -2.0f };
-
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
                                  FFX_DENOISER_VERSION_PATCH };
 
@@ -52,6 +47,10 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
 
     bool CreateDenoiserContext(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters);
     void ReleaseDenoiserContext();
+
+    // Push the [RayRegen] denoiser tuning floats (from _profile) into the denoiser once, at context
+    // creation. Live per-frame ffxConfigure wedged the gfx ring, so changes apply only on RR restart.
+    void ApplyDenoiserTuning();
 
   protected:
     bool InitInternal(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters) override;

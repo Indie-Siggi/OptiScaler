@@ -3237,8 +3237,10 @@ bool MenuCommon::RenderMenu()
                         else
                             ImGui::SeparatorText("DLSS Settings");
 
-                        // FSR Ray Regeneration (FFX-MLD) denoiser tuning - live sliders. Applied per-frame via
-                        // ffxConfigure by RayRegenFeatureDx12. -1 = leave the denoiser's internal default.
+                        // FSR Ray Regeneration (FFX-MLD) denoiser tuning. These set Config values only; they are
+                        // applied to the denoiser once, at context creation (ApplyDenoiserTuning), via the "Apply"
+                        // button below, which restarts Ray Regeneration. Applying per-frame wedged the GPU.
+                        // -1 = leave the denoiser's internal default.
                         if (usesDlssd)
                         {
                             if (auto chRR = ScopedCollapsingHeader("Ray Regeneration - Denoiser Tuning");
@@ -3246,7 +3248,7 @@ bool MenuCommon::RenderMenu()
                             {
                                 ScopedIndent indentRR {};
                                 ImGui::PushItemWidth(220.0f * menuResScale);
-                                ImGui::TextDisabled("-1 = denoiser default (no override). Applies live.");
+                                ImGui::TextDisabled("-1 = denoiser default (no override). Applies on restart.");
 
                                 float gkr = config->RrGaussianKernelRelaxation.value_or_default();
                                 if (ImGui::SliderFloat("Gaussian Kernel Relaxation", &gkr, -1.0f, 2.0f, "%.2f"))
@@ -3280,6 +3282,20 @@ bool MenuCommon::RenderMenu()
                                 if (ImGui::DragFloat("Max Radiance", &mr, 1.0f, -1.0f, 100000.0f, "%.1f"))
                                     config->RrMaxRadiance = mr;
                                 ShowHelpMarker("Max radiance clamp (fireflies). -1 = default.");
+
+                                ImGui::Spacing();
+                                if (ImGui::Button("Apply Tuning (restart Ray Regeneration)"))
+                                {
+                                    // Tuning is pushed into the denoiser only at context creation, so recreate
+                                    // the RR feature to pick up the slider values. This is the same GPU-safe
+                                    // feature-rebuild path used for other reinit-required settings; doing the
+                                    // reconfigure live per-frame wedged the gfx ring.
+                                    State::Instance().newBackend = Upscaler::DLSSD;
+                                    MARK_ALL_BACKENDS_CHANGED();
+                                }
+                                ShowHelpMarker("Denoiser tuning is applied once, when the Ray Regeneration\n"
+                                               "context is created. Applying it live per-frame wedged the GPU,\n"
+                                               "so slider changes take effect only after this restart.");
 
                                 ImGui::PopItemWidth();
                                 ImGui::Spacing();

@@ -48,6 +48,50 @@ void RayRegenFeatureDx12::ReleaseDenoiserContext()
     }
 }
 
+void RayRegenFeatureDx12::ApplyDenoiserTuning()
+{
+    if (_denoiserContext == nullptr)
+        return;
+
+    // The 6 FFX-MLD denoiser tuning floats, in profile order. A negative value (the -1 default) leaves the
+    // denoiser's internal default untouched. These come from _profile, which is snapshotted at context
+    // creation, so they are stable for the life of the context. ffxConfigure is only safe to call before the
+    // first dispatch (here) or while no dispatch is in flight; doing it per-frame wedged the gfx ring, so
+    // changing a value requires an RR restart (the menu Apply button recreates the feature -> re-resolves
+    // the profile -> re-enters this function).
+    const struct
+    {
+        uint64_t key;
+        float val;
+    } tunables[6] = {
+        { FFX_API_CONFIGURE_DENOISER_KEY_CROSS_BILATERAL_NORMAL_STRENGTH, _profile.crossBilateralNormalStrength },
+        { FFX_API_CONFIGURE_DENOISER_KEY_STABILITY_BIAS, _profile.stabilityBias },
+        { FFX_API_CONFIGURE_DENOISER_KEY_MAX_RADIANCE, _profile.maxRadiance },
+        { FFX_API_CONFIGURE_DENOISER_KEY_RADIANCE_CLIP_STD_K, _profile.radianceClipStdK },
+        { FFX_API_CONFIGURE_DENOISER_KEY_GAUSSIAN_KERNEL_RELAXATION, _profile.gaussianKernelRelaxation },
+        { FFX_API_CONFIGURE_DENOISER_KEY_DISOCCLUSION_THRESHOLD, _profile.disocclusionThreshold },
+    };
+
+    for (const auto& t : tunables)
+    {
+        if (t.val < 0.0f)
+            continue;
+
+        float v = t.val;
+        ffxConfigureDescDenoiserKeyValue kv = { 0 };
+        kv.header.type = FFX_API_CONFIGURE_DESC_TYPE_DENOISER_KEYVALUE;
+        kv.key = t.key;
+        kv.count = 1;
+        kv.data = &v;
+
+        auto ret = FfxApiProxy::D3D12_Configure(&_denoiserContext, &kv.header);
+        if (ret != FFX_API_RETURN_OK)
+            LOG_WARN("RR tunable key={0} apply failed: {1}", (unsigned) t.key, FfxApiProxy::ReturnCodeToString(ret));
+        else
+            LOG_INFO("RR tunable key={0} applied = {1}", (unsigned) t.key, v);
+    }
+}
+
 bool RayRegenFeatureDx12::InitInternal(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters)
 {
     LOG_DEBUG("RayRegenFeatureDx12::Init");
@@ -106,8 +150,11 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight,
              _profile.denoiserMode);
 
-    // Denoiser tuning overrides ([RayRegen]) are applied per-frame in EvaluateInternal (ApplyDenoiserTuning),
-    // so the overlay menu sliders take effect live without recreating the context.
+    // Apply the [RayRegen] denoiser tuning overrides ONCE here, at context creation, from the profile
+    // snapshot resolved above. Applying them live per-frame via ffxConfigure wedged the gfx ring (a
+    // reconfigure between dispatches stalls the queue), so tuning changes take effect only on an RR
+    // restart: the menu's "Apply" button recreates the feature, which re-enters this path.
+    ApplyDenoiserTuning();
 
     _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
     if (_convert == nullptr || !_convert->IsInit())
@@ -139,36 +186,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
         return false;
     }
 
-    // Live denoiser tuning: re-apply any changed [RayRegen] override via ffxConfigure (driven by the overlay
-    // sliders or the ini). Only values >= 0 are pushed; -1 leaves the denoiser default. ffxConfigure of a
-    // single scalar is cheap, and we only call it when the value actually changes since last applied.
-    {
-        const Config& cfg = *Config::Instance();
-        const struct { uint64_t key; float val; } live[6] = {
-            { FFX_API_CONFIGURE_DENOISER_KEY_CROSS_BILATERAL_NORMAL_STRENGTH,
-              cfg.RrCrossBilateralNormalStrength.value_or_default() },
-            { FFX_API_CONFIGURE_DENOISER_KEY_STABILITY_BIAS, cfg.RrStabilityBias.value_or_default() },
-            { FFX_API_CONFIGURE_DENOISER_KEY_MAX_RADIANCE, cfg.RrMaxRadiance.value_or_default() },
-            { FFX_API_CONFIGURE_DENOISER_KEY_RADIANCE_CLIP_STD_K, cfg.RrRadianceClipStdK.value_or_default() },
-            { FFX_API_CONFIGURE_DENOISER_KEY_GAUSSIAN_KERNEL_RELAXATION,
-              cfg.RrGaussianKernelRelaxation.value_or_default() },
-            { FFX_API_CONFIGURE_DENOISER_KEY_DISOCCLUSION_THRESHOLD, cfg.RrDisocclusionThreshold.value_or_default() },
-        };
-        for (int i = 0; i < 6; ++i)
-        {
-            if (live[i].val < 0.0f || live[i].val == _appliedTunables[i])
-                continue;
-            float v = live[i].val;
-            ffxConfigureDescDenoiserKeyValue kv = { 0 };
-            kv.header.type = FFX_API_CONFIGURE_DESC_TYPE_DENOISER_KEYVALUE;
-            kv.key = live[i].key;
-            kv.count = 1;
-            kv.data = &v;
-            FfxApiProxy::D3D12_Configure(&_denoiserContext, &kv.header);
-            _appliedTunables[i] = v;
-            LOG_INFO("RR tunable[{0}] key={1} applied = {2}", i, (unsigned) live[i].key, v);
-        }
-    }
+    // NOTE: denoiser tuning ([RayRegen] floats) is applied ONCE in CreateDenoiserContext via
+    // ApplyDenoiserTuning(), NOT here. Calling ffxConfigure per-frame (between dispatches) wedged the gfx
+    // ring, so tuning changes take effect only on an RR restart (menu Apply button -> feature recreation).
 
     ffxDispatchDescDenoiser dispatchDesc = { 0 };
     dispatchDesc.header.type = FFX_API_DISPATCH_DESC_TYPE_DENOISER;
