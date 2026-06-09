@@ -27,6 +27,13 @@ struct RRGameProfile
     uint32_t debugView = 0; // 0 = normal (recompose); 1..8 = visualize a converted signal (see RR_Resolve_Common.h)
     bool debugLog = false;  // sample + log converted values (centre + sky pixel) periodically to OptiScaler.log
     bool reprojection = true; // feed world-space camera basis + positionDelta from WorldToViewMatrix to the denoiser
+    // FFX-MLD denoiser tuning floats (ffxConfigure at context creation). -1 = no override (denoiser default).
+    float crossBilateralNormalStrength = -1.0f;
+    float stabilityBias = -1.0f;
+    float maxRadiance = -1.0f;
+    float radianceClipStdK = -1.0f;
+    float gaussianKernelRelaxation = -1.0f;
+    float disocclusionThreshold = -1.0f;
 };
 
 // Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].

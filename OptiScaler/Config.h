@@ -435,6 +435,13 @@ class Config
                                                       // 5 fusedAlbedo, 6 radiance, 7 skyMask, 8 denoised
     CustomOptional<bool> RrDebugLog { false };        // periodically log sampled converted values to OptiScaler.log
     CustomOptional<bool> RrReprojection { true };     // feed world-space camera basis + positionDelta to the denoiser
+    // FFX-MLD denoiser tuning floats (ffxConfigure). -1 = leave at the denoiser's internal default (no override).
+    CustomOptional<float> RrCrossBilateralNormalStrength { -1.0f }; // edge-stop by normals; higher = sharper edges
+    CustomOptional<float> RrStabilityBias { -1.0f };               // temporal stability vs responsiveness
+    CustomOptional<float> RrMaxRadiance { -1.0f };                 // max radiance clamp
+    CustomOptional<float> RrRadianceClipStdK { -1.0f };            // std-dev K for radiance/history clipping
+    CustomOptional<float> RrGaussianKernelRelaxation { -1.0f };    // spatial blur kernel; lower = sharper
+    CustomOptional<float> RrDisocclusionThreshold { -1.0f };       // depth-compare threshold for reprojection
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };

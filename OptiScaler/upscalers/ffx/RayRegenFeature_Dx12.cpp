@@ -106,6 +106,34 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight,
              _profile.denoiserMode);
 
+    // Apply the optional denoiser tuning overrides ([RayRegen]) via ffxConfigure. Each defaults to -1
+    // (leave the denoiser's internal default); only values >= 0 are pushed, so by default behaviour is
+    // unchanged. These dial the spatial-blur vs edge/temporal balance (see ffx_denoiser.h FfxApiConfigureDenoiserKey).
+    struct RRTunable { uint64_t key; float value; const char* name; };
+    const RRTunable tunables[] = {
+        { FFX_API_CONFIGURE_DENOISER_KEY_CROSS_BILATERAL_NORMAL_STRENGTH, _profile.crossBilateralNormalStrength,
+          "CrossBilateralNormalStrength" },
+        { FFX_API_CONFIGURE_DENOISER_KEY_STABILITY_BIAS, _profile.stabilityBias, "StabilityBias" },
+        { FFX_API_CONFIGURE_DENOISER_KEY_MAX_RADIANCE, _profile.maxRadiance, "MaxRadiance" },
+        { FFX_API_CONFIGURE_DENOISER_KEY_RADIANCE_CLIP_STD_K, _profile.radianceClipStdK, "RadianceClipStdK" },
+        { FFX_API_CONFIGURE_DENOISER_KEY_GAUSSIAN_KERNEL_RELAXATION, _profile.gaussianKernelRelaxation,
+          "GaussianKernelRelaxation" },
+        { FFX_API_CONFIGURE_DENOISER_KEY_DISOCCLUSION_THRESHOLD, _profile.disocclusionThreshold,
+          "DisocclusionThreshold" },
+    };
+    for (const auto& t : tunables)
+    {
+        if (t.value < 0.0f)
+            continue;
+        ffxConfigureDescDenoiserKeyValue kv = { 0 };
+        kv.header.type = FFX_API_CONFIGURE_DESC_TYPE_DENOISER_KEYVALUE;
+        kv.key = t.key;
+        kv.count = 1;
+        kv.data = &t.value;
+        auto cret = FfxApiProxy::D3D12_Configure(&_denoiserContext, &kv.header);
+        LOG_INFO("RR tunable {0} = {1} (configure: {2})", t.name, t.value, FfxApiProxy::ReturnCodeToString(cret));
+    }
+
     _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
     if (_convert == nullptr || !_convert->IsInit())
     {

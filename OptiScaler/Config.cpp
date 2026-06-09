@@ -273,6 +273,12 @@ bool Config::Reload(std::filesystem::path iniPath)
             RrDebugView.set_from_config(readInt("RayRegen", "DebugView"));
             RrDebugLog.set_from_config(readBool("RayRegen", "DebugLog"));
             RrReprojection.set_from_config(readBool("RayRegen", "Reprojection"));
+            RrCrossBilateralNormalStrength.set_from_config(readFloat("RayRegen", "CrossBilateralNormalStrength"));
+            RrStabilityBias.set_from_config(readFloat("RayRegen", "StabilityBias"));
+            RrMaxRadiance.set_from_config(readFloat("RayRegen", "MaxRadiance"));
+            RrRadianceClipStdK.set_from_config(readFloat("RayRegen", "RadianceClipStdK"));
+            RrGaussianKernelRelaxation.set_from_config(readFloat("RayRegen", "GaussianKernelRelaxation"));
+            RrDisocclusionThreshold.set_from_config(readFloat("RayRegen", "DisocclusionThreshold"));
 
             if (auto setting = readInt("FSR", "Fsr4Model"); setting.has_value() && setting >= 0 && setting <= 5)
                 Fsr4Model.set_from_config(setting);
@@ -1044,6 +1050,16 @@ bool Config::SaveIni()
         ini.SetValue("RayRegen", "DebugView", GetIntValue(Instance()->RrDebugView.value_for_config()).c_str());
         ini.SetValue("RayRegen", "DebugLog", GetBoolValue(Instance()->RrDebugLog.value_for_config()).c_str());
         ini.SetValue("RayRegen", "Reprojection", GetBoolValue(Instance()->RrReprojection.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "CrossBilateralNormalStrength",
+                     GetFloatValue(Instance()->RrCrossBilateralNormalStrength.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "StabilityBias", GetFloatValue(Instance()->RrStabilityBias.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "MaxRadiance", GetFloatValue(Instance()->RrMaxRadiance.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "RadianceClipStdK",
+                     GetFloatValue(Instance()->RrRadianceClipStdK.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "GaussianKernelRelaxation",
+                     GetFloatValue(Instance()->RrGaussianKernelRelaxation.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "DisocclusionThreshold",
+                     GetFloatValue(Instance()->RrDisocclusionThreshold.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());
