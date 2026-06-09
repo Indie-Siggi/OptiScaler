@@ -52,6 +52,12 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     // creation. Live per-frame ffxConfigure wedged the gfx ring, so changes apply only on RR restart.
     void ApplyDenoiserTuning();
 
+    // Block until the game's command queue has drained, so the denoiser context + our convert/resolve
+    // resources are no longer referenced by in-flight GPU work before we tear them down. Without this, an
+    // in-session feature recreate (OptiScaler's Apply / backend change) frees resources the GPU is still
+    // using and page-faults a frame later (device removed -> game crash).
+    void WaitForGpuIdle();
+
   protected:
     bool InitInternal(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters) override;
     bool EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters) override;

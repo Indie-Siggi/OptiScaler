@@ -64,7 +64,35 @@ RayRegenFeatureDx12::~RayRegenFeatureDx12()
     if (State::Instance().isShuttingDown)
         return;
 
+    // The denoiser context and our convert/resolve resources (freed when the _convert/_resolve members are
+    // destroyed right after this body) may still be referenced by the last frame's command list executing on
+    // the GPU. Drain the queue first so a mid-session recreate (OptiScaler Apply / backend change) does not
+    // free in-flight resources and page-fault the GPU a frame later.
+    WaitForGpuIdle();
+
     ReleaseDenoiserContext();
+}
+
+void RayRegenFeatureDx12::WaitForGpuIdle()
+{
+    auto* queue = State::Instance().currentCommandQueue;
+    if (queue == nullptr || Device == nullptr)
+        return;
+
+    ID3D12Fence* fence = nullptr;
+    if (FAILED(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))) || fence == nullptr)
+        return;
+
+    HANDLE event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (SUCCEEDED(queue->Signal(fence, 1)) && fence->GetCompletedValue() < 1 && event != nullptr)
+    {
+        fence->SetEventOnCompletion(1, event);
+        WaitForSingleObject(event, 2000); // 2 s safety cap; teardown is rare, never block the game indefinitely
+    }
+
+    if (event != nullptr)
+        CloseHandle(event);
+    fence->Release();
 }
 
 void RayRegenFeatureDx12::ReleaseDenoiserContext()
