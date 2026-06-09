@@ -26,6 +26,7 @@ struct RRGameProfile
     float skyThreshold = 0.999f; // viewZ >= FarPlane * this marks a sky pixel for the skip-signal bypass
     uint32_t debugView = 0; // 0 = normal (recompose); 1..8 = visualize a converted signal (see RR_Resolve_Common.h)
     bool debugLog = false;  // sample + log converted values (centre + sky pixel) periodically to OptiScaler.log
+    bool reprojection = true; // feed world-space camera basis + positionDelta from WorldToViewMatrix to the denoiser
 };
 
 // Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].

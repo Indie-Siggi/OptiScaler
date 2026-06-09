@@ -21,6 +21,7 @@ RRGameProfile ResolveRRProfile()
     p.skyThreshold = cfg.RrSkyThreshold.value_or_default();
     p.debugView = static_cast<uint32_t>(cfg.RrDebugView.value_or_default());
     p.debugLog = cfg.RrDebugLog.value_or_default();
+    p.reprojection = cfg.RrReprojection.value_or_default();
 
     // TODO(Step 5): switch on State::Instance().GameName / NVNGX_Engine to pick a per-game profile
     // (e.g. a Cyberpunk profile), then let the [RayRegen] ini values override individual fields.

@@ -221,6 +221,54 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     dispatchDesc.cameraAspectRatio = (_renderHeight > 0) ? (float) _renderWidth / (float) _renderHeight : 1.0f;
     dispatchDesc.deltaTime = frameTimeMs;
 
+    // World-space camera basis + position delta for the denoiser's reprojection (FFX dispatch desc,
+    // ffx_denoiser.h:124-127). Without these the denoiser falls back to MV-only reprojection and over-blurs.
+    // Cyberpunk provides WorldToViewMatrix (row-major, left-multiply): the camera's world-space right/up/
+    // forward are the columns of the rotation, world position is -(t . rows of R). Gated by [RayRegen]
+    // Reprojection (default on) + a unit-length sanity check, so a wrong/absent matrix falls back to the
+    // previous zeros (MV-only) rather than feeding garbage. Logged below to verify the convention.
+    float camRight[3] = { 0, 0, 0 }, camUp[3] = { 0, 0, 0 }, camFwd[3] = { 0, 0, 0 };
+    float camPos[3] = { 0, 0, 0 }, posDelta[3] = { 0, 0, 0 };
+    uint32_t reprojValid = 0;
+    if (_profile.reprojection)
+    {
+        void* worldToViewPtr = nullptr;
+        if (InParameters->Get("WorldToViewMatrix", &worldToViewPtr) == NVSDK_NGX_Result_Success &&
+            worldToViewPtr != nullptr)
+        {
+            const float* w = reinterpret_cast<const float*>(worldToViewPtr);
+            camRight[0] = w[0]; camRight[1] = w[4]; camRight[2] = w[8];  // column 0 of R
+            camUp[0] = w[1];    camUp[1] = w[5];    camUp[2] = w[9];     // column 1
+            camFwd[0] = w[2];   camFwd[1] = w[6];   camFwd[2] = w[10];   // column 2
+            float t0 = w[12], t1 = w[13], t2 = w[14];
+            camPos[0] = -(t0 * w[0] + t1 * w[1] + t2 * w[2]);  // -(t . row0 of R)
+            camPos[1] = -(t0 * w[4] + t1 * w[5] + t2 * w[6]);
+            camPos[2] = -(t0 * w[8] + t1 * w[9] + t2 * w[10]);
+
+            auto len3 = [](const float* v) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); };
+            float lr = len3(camRight), lu = len3(camUp), lf = len3(camFwd);
+            if (lr > 0.5f && lr < 2.0f && lu > 0.5f && lu < 2.0f && lf > 0.5f && lf < 2.0f)
+            {
+                reprojValid = 1;
+                if (_prevCamPosValid)
+                {
+                    posDelta[0] = _prevCameraPosition[0] - camPos[0];
+                    posDelta[1] = _prevCameraPosition[1] - camPos[1];
+                    posDelta[2] = _prevCameraPosition[2] - camPos[2];
+                }
+                _prevCameraPosition[0] = camPos[0];
+                _prevCameraPosition[1] = camPos[1];
+                _prevCameraPosition[2] = camPos[2];
+                _prevCamPosValid = true;
+
+                dispatchDesc.cameraRight = { camRight[0], camRight[1], camRight[2] };
+                dispatchDesc.cameraUp = { camUp[0], camUp[1], camUp[2] };
+                dispatchDesc.cameraForward = { camFwd[0], camFwd[1], camFwd[2] };
+                dispatchDesc.cameraPositionDelta = { posDelta[0], posDelta[1], posDelta[2] };
+            }
+        }
+    }
+
     // --- Read the intercepted NGX Ray-Reconstruction inputs --------------------------------------
     ID3D12Resource* inColor = nullptr;   InParameters->Get(NVSDK_NGX_Parameter_Color, &inColor);
     ID3D12Resource* inOutput = nullptr;  InParameters->Get(NVSDK_NGX_Parameter_Output, &inOutput);
@@ -368,6 +416,10 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
                  debugView, _profile.skyThreshold, _profile.reversedZ, _profile.demodulateRadiance);
         LOG_INFO("RR-debug depthMtx: has={0} A={1:.5f} B={2:.5f} C={3:.5f} D={4:.5f}", hasDepthMatrix, depthMatA,
                  depthMatB, depthMatC, depthMatD);
+        LOG_INFO("RR-debug reproj: valid={0} right=({1:.3f},{2:.3f},{3:.3f}) fwd=({4:.3f},{5:.3f},{6:.3f}) "
+                 "camPos=({7:.2f},{8:.2f},{9:.2f}) posDelta=({10:.4f},{11:.4f},{12:.4f})",
+                 reprojValid, camRight[0], camRight[1], camRight[2], camFwd[0], camFwd[1], camFwd[2], camPos[0],
+                 camPos[1], camPos[2], posDelta[0], posDelta[1], posDelta[2]);
         _convert->LogDebugSamples();
     }
 

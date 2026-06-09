@@ -434,6 +434,7 @@ class Config
     CustomOptional<int> RrDebugView { 0 };            // 0 = normal; 1 depth, 2 normals, 3 roughness, 4 MV,
                                                       // 5 fusedAlbedo, 6 radiance, 7 skyMask, 8 denoised
     CustomOptional<bool> RrDebugLog { false };        // periodically log sampled converted values to OptiScaler.log
+    CustomOptional<bool> RrReprojection { true };     // feed world-space camera basis + positionDelta to the denoiser
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };

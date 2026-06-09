@@ -30,6 +30,7 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
 
     // Needed for ffxDispatchDescDenoiser.cameraPositionDelta (PreviousPosition - CurrentPosition).
     float _prevCameraPosition[3] = { 0.0f, 0.0f, 0.0f };
+    bool _prevCamPosValid = false;
     bool _resetHistory = true;
 
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
