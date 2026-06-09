@@ -3251,51 +3251,49 @@ bool MenuCommon::RenderMenu()
                                 ImGui::TextDisabled("-1 = denoiser default (no override). Applies on restart.");
 
                                 float gkr = config->RrGaussianKernelRelaxation.value_or_default();
-                                if (ImGui::SliderFloat("Gaussian Kernel Relaxation", &gkr, -1.0f, 2.0f, "%.2f"))
+                                if (ImGui::SliderFloat("Gaussian Kernel Relaxation", &gkr, -1.0f, 1.0f, "%.2f"))
                                     config->RrGaussianKernelRelaxation = gkr;
                                 ShowHelpMarker("Spatial blur kernel. Lower = sharper (less blur).\n"
-                                               "Fixes near softness. -1 = denoiser default.");
+                                               "AMD range 0..1. -1 = denoiser default.");
 
                                 float cbns = config->RrCrossBilateralNormalStrength.value_or_default();
-                                if (ImGui::SliderFloat("Cross-Bilateral Normal Strength", &cbns, -1.0f, 4.0f, "%.2f"))
+                                if (ImGui::SliderFloat("Cross-Bilateral Normal Strength", &cbns, -1.0f, 1.0f, "%.2f"))
                                     config->RrCrossBilateralNormalStrength = cbns;
-                                ShowHelpMarker("Edge-stopping by normals. Higher = sharper edges. -1 = default.");
+                                ShowHelpMarker("Edge-stopping by normals. Higher = sharper edges.\n"
+                                               "AMD range 0..1. -1 = default.");
 
                                 float sb = config->RrStabilityBias.value_or_default();
-                                if (ImGui::SliderFloat("Stability Bias", &sb, -1.0f, 2.0f, "%.2f"))
+                                if (ImGui::SliderFloat("Stability Bias", &sb, -1.0f, 1.0f, "%.2f"))
                                     config->RrStabilityBias = sb;
-                                ShowHelpMarker("Temporal stability vs responsiveness. Higher = more stable\n"
-                                               "(helps distant over-sharpen). -1 = default.");
+                                ShowHelpMarker("Temporal stability vs responsiveness. Higher = more stable.\n"
+                                               "AMD range 0..1. -1 = default.");
 
                                 float rck = config->RrRadianceClipStdK.value_or_default();
                                 if (ImGui::SliderFloat("Radiance Clip Std-K", &rck, -1.0f, 10.0f, "%.2f"))
                                     config->RrRadianceClipStdK = rck;
-                                ShowHelpMarker("History clipping std-dev multiplier. -1 = default.");
+                                ShowHelpMarker("History clipping std-dev multiplier (firefly/ghost reject).\n"
+                                               "AMD allows up to 65504; small values (1..10) are typical. -1 = default.");
 
                                 float dt = config->RrDisocclusionThreshold.value_or_default();
-                                if (ImGui::DragFloat("Disocclusion Threshold", &dt, 0.1f, -1.0f, 100000.0f, "%.3f"))
+                                if (ImGui::SliderFloat("Disocclusion Threshold", &dt, -1.0f, 0.1f, "%.3f"))
                                     config->RrDisocclusionThreshold = dt;
-                                ShowHelpMarker("Depth-compare threshold for temporal reprojection.\n"
-                                               "Cyberpunk linear depth is large; try larger values. -1 = default.");
+                                ShowHelpMarker("Reprojection depth-compare threshold (normalized, NOT world units).\n"
+                                               "AMD range 0.01..0.05; too large => never disoccludes => over-blur.\n"
+                                               "-1 = default.");
 
                                 float mr = config->RrMaxRadiance.value_or_default();
-                                if (ImGui::DragFloat("Max Radiance", &mr, 1.0f, -1.0f, 100000.0f, "%.1f"))
+                                if (ImGui::DragFloat("Max Radiance", &mr, 1.0f, -1.0f, 65504.0f, "%.1f"))
                                     config->RrMaxRadiance = mr;
-                                ShowHelpMarker("Max radiance clamp (fireflies). -1 = default.");
+                                ShowHelpMarker("Max radiance clamp (fireflies). AMD range 0..65504. -1 = default.");
 
                                 ImGui::Spacing();
-                                if (ImGui::Button("Apply Tuning (restart Ray Regeneration)"))
-                                {
-                                    // Tuning is pushed into the denoiser only at context creation, so recreate
-                                    // the RR feature to pick up the slider values. This is the same GPU-safe
-                                    // feature-rebuild path used for other reinit-required settings; doing the
-                                    // reconfigure live per-frame wedged the gfx ring.
-                                    State::Instance().newBackend = Upscaler::DLSSD;
-                                    MARK_ALL_BACKENDS_CHANGED();
-                                }
-                                ShowHelpMarker("Denoiser tuning is applied once, when the Ray Regeneration\n"
-                                               "context is created. Applying it live per-frame wedged the GPU,\n"
-                                               "so slider changes take effect only after this restart.");
+                                ImGui::TextWrapped("Changes apply when Ray Regeneration is next created. "
+                                                   "Save INI and restart the game to apply.");
+                                ShowHelpMarker("Denoiser tuning is pushed into the context only at creation.\n"
+                                               "Rebuilding it live (per-frame reconfigure OR an in-session\n"
+                                               "feature recreate) crashed/wedged the GPU, so changes take\n"
+                                               "effect on the next Ray Regeneration init: Save INI, restart\n"
+                                               "the game. -1 on any slider = leave the denoiser's default.");
 
                                 ImGui::PopItemWidth();
                                 ImGui::Spacing();

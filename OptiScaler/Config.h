@@ -435,13 +435,19 @@ class Config
                                                       // 5 fusedAlbedo, 6 radiance, 7 skyMask, 8 denoised
     CustomOptional<bool> RrDebugLog { false };        // periodically log sampled converted values to OptiScaler.log
     CustomOptional<bool> RrReprojection { true };     // feed world-space camera basis + positionDelta to the denoiser
-    // FFX-MLD denoiser tuning floats (ffxConfigure). -1 = leave at the denoiser's internal default (no override).
-    CustomOptional<float> RrCrossBilateralNormalStrength { -1.0f }; // edge-stop by normals; higher = sharper edges
-    CustomOptional<float> RrStabilityBias { -1.0f };               // temporal stability vs responsiveness
-    CustomOptional<float> RrMaxRadiance { -1.0f };                 // max radiance clamp
-    CustomOptional<float> RrRadianceClipStdK { -1.0f };            // std-dev K for radiance/history clipping
-    CustomOptional<float> RrGaussianKernelRelaxation { -1.0f };    // spatial blur kernel; lower = sharper
-    CustomOptional<float> RrDisocclusionThreshold { -1.0f };       // depth-compare threshold for reprojection
+    // FFX-MLD denoiser tuning floats, applied once at context creation (ffxConfigure). -1 = leave at the
+    // denoiser's internal default (no override). AMD's own UI ranges (FidelityFX_Denoiser sample):
+    // CrossBilateralNormalStrength 0..1, StabilityBias 0..1, GaussianKernelRelaxation 0..1,
+    // DisocclusionThreshold 0.01..0.05, MaxRadiance / RadianceClipStdK 0..65504. The non--1 defaults below
+    // are PROVISIONAL guesses biased toward sharpness (to counter the current over-blur) pending the
+    // RenderDoc convention diagnosis (see reports/2026-06-09-rr-overblur-renderdoc-capture-plan.md); the
+    // real over-blur fix is likely a depth/motion-vector convention, not tuning.
+    CustomOptional<float> RrCrossBilateralNormalStrength { 1.0f };  // edge-stop by normals; higher = sharper edges
+    CustomOptional<float> RrStabilityBias { 0.5f };                // temporal stability vs responsiveness (mid)
+    CustomOptional<float> RrMaxRadiance { -1.0f };                 // max radiance clamp (firefly); leave default
+    CustomOptional<float> RrRadianceClipStdK { -1.0f };            // std-dev K for history clipping; leave default
+    CustomOptional<float> RrGaussianKernelRelaxation { 0.0f };     // spatial blur kernel; 0 = sharpest (less blur)
+    CustomOptional<float> RrDisocclusionThreshold { 0.02f };       // reprojection depth threshold (AMD 0.01..0.05)
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };
