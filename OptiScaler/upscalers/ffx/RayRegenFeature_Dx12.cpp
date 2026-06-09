@@ -1,5 +1,6 @@
 #include <pch.h>
 #include <cmath>
+#include <cstring>
 #include <Config.h>
 #include <Util.h>
 #include <NVNGX_Parameter.h>
@@ -15,6 +16,33 @@
 // sqrt-encode albedo, build fusedAlbedo = sqrt(max(spec,diff)), pack UV motion vectors + depth
 // delta, and demodulate the radiance. Until then the visual result is not correct, but the path
 // compiles, links, creates the context, and dispatches end to end.
+
+namespace
+{
+// Scoped GPU debug marker. Emits the PIX ANSI-string convention (metadata = 1, plain char*), which
+// vkd3d-proton decodes (command.c decode_pix_string) into a VkDebugUtilsLabelEXT, so each RR pass shows
+// up as a labelled region in RenderDoc and RGP captures. It is a cheap no-op when EXT_debug_utils is not
+// enabled (i.e. normal gameplay with no capture tool attached), so it costs nothing outside captures.
+struct ScopedGpuMarker
+{
+    ID3D12GraphicsCommandList* cmdList;
+
+    ScopedGpuMarker(ID3D12GraphicsCommandList* cl, const char* name) : cmdList(cl)
+    {
+        if (cmdList != nullptr && name != nullptr)
+            cmdList->BeginEvent(1u /* PIX_EVENT_ANSI_VERSION */, name, (UINT) std::strlen(name));
+    }
+
+    ~ScopedGpuMarker()
+    {
+        if (cmdList != nullptr)
+            cmdList->EndEvent();
+    }
+
+    ScopedGpuMarker(const ScopedGpuMarker&) = delete;
+    ScopedGpuMarker& operator=(const ScopedGpuMarker&) = delete;
+};
+} // namespace
 
 RayRegenFeatureDx12::RayRegenFeatureDx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters)
     : IFeature(InHandleId, InParameters), IFeature_Dx12(InHandleId, InParameters)
@@ -401,10 +429,14 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // would mis-validate temporal reprojection for that frame.
     rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0 && !isReset) ? 1u : 0u;
 
-    if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb, inSpecHit))
     {
-        LOG_ERROR("NGX-RR -> MLD conversion dispatch failed");
-        return false;
+        ScopedGpuMarker marker(InCommandList, "RR Convert (NGX-RR -> MLD inputs)");
+        if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb,
+                                inSpecHit))
+        {
+            LOG_ERROR("NGX-RR -> MLD conversion dispatch failed");
+            return false;
+        }
     }
 
     // Make the converted inputs readable by the denoiser.
@@ -438,12 +470,15 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
 
         dispatchDesc.header.pNext = &sig.header;
 
-        auto ret = FfxApiProxy::D3D12_Dispatch(&_denoiserContext, &dispatchDesc.header);
-
-        if (ret != FFX_API_RETURN_OK)
         {
-            LOG_ERROR("D3D12_Dispatch (denoiser) error: {0}", FfxApiProxy::ReturnCodeToString(ret));
-            return false;
+            ScopedGpuMarker marker(InCommandList, "RR MLD Denoise (FFX 1-signal)");
+            auto ret = FfxApiProxy::D3D12_Dispatch(&_denoiserContext, &dispatchDesc.header);
+
+            if (ret != FFX_API_RETURN_OK)
+            {
+                LOG_ERROR("D3D12_Dispatch (denoiser) error: {0}", FfxApiProxy::ReturnCodeToString(ret));
+                return false;
+            }
         }
     }
 
@@ -455,12 +490,15 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrr.NearPlane = camNear;
     rrr.FarPlane = camFar;
 
-    if (!_resolve->Dispatch(InCommandList, rrr, _convert->SkipSignal(), _convert->Radiance(),
-                            _convert->LinearDepth(), _convert->MotionVectors(), _convert->Normals(),
-                            _convert->FusedAlbedo(), inOutput))
     {
-        LOG_ERROR("RR resolve dispatch failed");
-        return false;
+        ScopedGpuMarker marker(InCommandList, "RR Resolve (recompose/debug)");
+        if (!_resolve->Dispatch(InCommandList, rrr, _convert->SkipSignal(), _convert->Radiance(),
+                                _convert->LinearDepth(), _convert->MotionVectors(), _convert->Normals(),
+                                _convert->FusedAlbedo(), inOutput))
+        {
+            LOG_ERROR("RR resolve dispatch failed");
+            return false;
+        }
     }
 
     // Periodic diagnostic logging (RrDebugLog). CPU-side context (the camera-plane source is the prime
