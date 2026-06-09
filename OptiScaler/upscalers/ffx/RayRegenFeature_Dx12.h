@@ -33,6 +33,11 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     bool _prevCamPosValid = false;
     bool _resetHistory = true;
 
+    // Last-applied values of the 6 [RayRegen] denoiser tuning floats (order: CrossBilateralNormalStrength,
+    // StabilityBias, MaxRadiance, RadianceClipStdK, GaussianKernelRelaxation, DisocclusionThreshold). -2 =
+    // never applied. Re-applied via ffxConfigure each frame only when the (live) Config value changes.
+    float _appliedTunables[6] = { -2.0f, -2.0f, -2.0f, -2.0f, -2.0f, -2.0f };
+
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
                                  FFX_DENOISER_VERSION_PATCH };
 

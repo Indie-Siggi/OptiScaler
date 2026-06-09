@@ -3237,6 +3237,55 @@ bool MenuCommon::RenderMenu()
                         else
                             ImGui::SeparatorText("DLSS Settings");
 
+                        // FSR Ray Regeneration (FFX-MLD) denoiser tuning - live sliders. Applied per-frame via
+                        // ffxConfigure by RayRegenFeatureDx12. -1 = leave the denoiser's internal default.
+                        if (usesDlssd)
+                        {
+                            if (auto chRR = ScopedCollapsingHeader("Ray Regeneration - Denoiser Tuning");
+                                chRR.IsHeaderOpen())
+                            {
+                                ScopedIndent indentRR {};
+                                ImGui::PushItemWidth(220.0f * menuResScale);
+                                ImGui::TextDisabled("-1 = denoiser default (no override). Applies live.");
+
+                                float gkr = config->RrGaussianKernelRelaxation.value_or_default();
+                                if (ImGui::SliderFloat("Gaussian Kernel Relaxation", &gkr, -1.0f, 2.0f, "%.2f"))
+                                    config->RrGaussianKernelRelaxation = gkr;
+                                ShowHelpMarker("Spatial blur kernel. Lower = sharper (less blur).\n"
+                                               "Fixes near softness. -1 = denoiser default.");
+
+                                float cbns = config->RrCrossBilateralNormalStrength.value_or_default();
+                                if (ImGui::SliderFloat("Cross-Bilateral Normal Strength", &cbns, -1.0f, 4.0f, "%.2f"))
+                                    config->RrCrossBilateralNormalStrength = cbns;
+                                ShowHelpMarker("Edge-stopping by normals. Higher = sharper edges. -1 = default.");
+
+                                float sb = config->RrStabilityBias.value_or_default();
+                                if (ImGui::SliderFloat("Stability Bias", &sb, -1.0f, 2.0f, "%.2f"))
+                                    config->RrStabilityBias = sb;
+                                ShowHelpMarker("Temporal stability vs responsiveness. Higher = more stable\n"
+                                               "(helps distant over-sharpen). -1 = default.");
+
+                                float rck = config->RrRadianceClipStdK.value_or_default();
+                                if (ImGui::SliderFloat("Radiance Clip Std-K", &rck, -1.0f, 10.0f, "%.2f"))
+                                    config->RrRadianceClipStdK = rck;
+                                ShowHelpMarker("History clipping std-dev multiplier. -1 = default.");
+
+                                float dt = config->RrDisocclusionThreshold.value_or_default();
+                                if (ImGui::DragFloat("Disocclusion Threshold", &dt, 0.1f, -1.0f, 100000.0f, "%.3f"))
+                                    config->RrDisocclusionThreshold = dt;
+                                ShowHelpMarker("Depth-compare threshold for temporal reprojection.\n"
+                                               "Cyberpunk linear depth is large; try larger values. -1 = default.");
+
+                                float mr = config->RrMaxRadiance.value_or_default();
+                                if (ImGui::DragFloat("Max Radiance", &mr, 1.0f, -1.0f, 100000.0f, "%.1f"))
+                                    config->RrMaxRadiance = mr;
+                                ShowHelpMarker("Max radiance clamp (fireflies). -1 = default.");
+
+                                ImGui::PopItemWidth();
+                                ImGui::Spacing();
+                            }
+                        }
+
                         auto overridden =
                             usesDlssd ? state.dlssdPresetsOverriddenExternally : state.dlssPresetsOverriddenExternally;
 
