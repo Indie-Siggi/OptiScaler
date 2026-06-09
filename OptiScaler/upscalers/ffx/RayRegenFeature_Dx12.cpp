@@ -341,6 +341,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.DepthMatC = depthMatC;
     rrc.DepthMatD = depthMatD;
     rrc.HasDepthMatrix = hasDepthMatrix;
+    // Compute the MV depth delta once history exists (>0 frames) and reprojection is enabled.
+    rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0) ? 1u : 0u;
 
     if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb, inSpecHit))
     {

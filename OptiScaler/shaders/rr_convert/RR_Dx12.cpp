@@ -74,6 +74,16 @@ bool RR_Dx12::CreateBufferResources(ID3D12Device* InDevice, ID3D12Resource* InRe
         _debugReadback->SetName(L"RR_DebugReadback");
     }
 
+    // Previous-frame linear depth (R32F) for the MV depth delta. Same format as the LinearDepth output (u2).
+    if (!Shader_Dx12::CreateBufferResource(InDevice, InRef, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                           &_linearDepthHistory, flags, InWidth, InHeight, DXGI_FORMAT_R32_FLOAT))
+    {
+        LOG_ERROR("[{0}] Failed to create the linear-depth history buffer", _name);
+        return false;
+    }
+    _linearDepthHistory->SetName(L"RR_LinearDepthHistory");
+    _historyState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
     _width = InWidth;
     _height = InHeight;
     return true;
@@ -118,7 +128,32 @@ bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& 
         return false;
     }
 
-    // Outputs must be writable for the compute pass.
+    // Snapshot last frame's linear depth (still in _outputs[2]) into the history buffer before this frame
+    // overwrites it, so the shader can sample it for the motion-vector depth delta (t7). On the first frame
+    // the content is undefined; the backend sets HasPrevDepth=0 so the shader ignores it.
+    if (_linearDepthHistory != nullptr && _outputs[2] != nullptr)
+    {
+        D3D12_RESOURCE_BARRIER pre[2] = {};
+        UINT n = 0;
+        if (_outputStates[2] != D3D12_RESOURCE_STATE_COPY_SOURCE)
+            pre[n++] = CD3DX12_RESOURCE_BARRIER::Transition(_outputs[2], _outputStates[2],
+                                                            D3D12_RESOURCE_STATE_COPY_SOURCE);
+        if (_historyState != D3D12_RESOURCE_STATE_COPY_DEST)
+            pre[n++] = CD3DX12_RESOURCE_BARRIER::Transition(_linearDepthHistory, _historyState,
+                                                            D3D12_RESOURCE_STATE_COPY_DEST);
+        if (n > 0)
+            InCmdList->ResourceBarrier(n, pre);
+        _outputStates[2] = D3D12_RESOURCE_STATE_COPY_SOURCE;
+
+        InCmdList->CopyResource(_linearDepthHistory, _outputs[2]);
+
+        auto toRead = CD3DX12_RESOURCE_BARRIER::Transition(_linearDepthHistory, D3D12_RESOURCE_STATE_COPY_DEST,
+                                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        InCmdList->ResourceBarrier(1, &toRead);
+        _historyState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+
+    // Outputs must be writable for the compute pass (also restores _outputs[2] from COPY_SOURCE to UAV).
     TransitionOutputs(InCmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     _counter = (_counter + 1) % RR_NUM_OF_HEAPS;
@@ -132,6 +167,7 @@ bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& 
     CreateShaderResourceView(_device, InDiffuseAlbedo, heap.GetSrvCPU(4));
     CreateShaderResourceView(_device, InSpecularAlbedo, heap.GetSrvCPU(5));
     CreateShaderResourceView(_device, InSpecularHitDistance, heap.GetSrvCPU(6));
+    CreateShaderResourceView(_device, _linearDepthHistory, heap.GetSrvCPU(7)); // t7 previous-frame linear depth
 
     // UAVs u0..u7 (image outputs)
     for (int i = 0; i < RR_NUM_OUTPUTS; i++)
@@ -222,8 +258,8 @@ RR_Dx12::RR_Dx12(std::string InName, ID3D12Device* InDevice) : Shader_Dx12(InNam
 
     LOG_DEBUG("{0} start!", _name);
 
-    // 7 SRVs (+ spec hit distance), RR_NUM_OUTPUTS image UAVs + 1 debug buffer UAV (u8), 1 CBV.
-    if (!SetupRootSignature(InDevice, 7, RR_NUM_OUTPUTS + 1, 1))
+    // 8 SRVs (+ spec hit distance + prev linear depth), RR_NUM_OUTPUTS image UAVs + 1 debug buffer UAV, 1 CBV.
+    if (!SetupRootSignature(InDevice, 8, RR_NUM_OUTPUTS + 1, 1))
     {
         LOG_ERROR("Failed to setup root signature");
         return;
@@ -266,4 +302,5 @@ RR_Dx12::~RR_Dx12()
 
     SAFE_RELEASE(_debugBuffer);
     SAFE_RELEASE(_debugReadback);
+    SAFE_RELEASE(_linearDepthHistory);
 }

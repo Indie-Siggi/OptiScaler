@@ -29,6 +29,11 @@ class RR_Dx12 : public Shader_Dx12
     ID3D12Resource* _debugReadback = nullptr;   // READBACK heap, mapped for CPU logging
     D3D12_RESOURCE_STATES _debugState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
+    // Previous-frame linear depth (t7), for the motion-vector depth delta. Each frame we copy the live
+    // linear-depth output into this before overwriting it, so the shader can sample last frame's depth.
+    ID3D12Resource* _linearDepthHistory = nullptr; // R32F, render-res
+    D3D12_RESOURCE_STATES _historyState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
     uint32_t _width = 0;
     uint32_t _height = 0;
 

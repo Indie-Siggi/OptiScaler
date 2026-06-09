@@ -34,6 +34,7 @@ struct alignas(256) RRConstants
     float DepthMatC;
     float DepthMatD;
     uint32_t HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = fall back to the near/far closed form
+    uint32_t HasPrevDepth;       // 1 = compute the motion-vector .z depth delta from InPrevLinearDepth (history)
 };
 
 // OutDebug layout: 2 sample pixels x 4 float4 each (centre at base 0, sky at base 4):
@@ -68,6 +69,7 @@ cbuffer Params : register(b0)
     float DepthMatC;
     float DepthMatD;
     uint  HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = near/far closed form
+    uint  HasPrevDepth;       // 1 = compute MV .z depth delta from InPrevLinearDepth
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -77,6 +79,7 @@ Texture2D<float4> InNormalRoughness : register(t3); // RGB normal, A linear roug
 Texture2D<float4> InDiffuseAlbedo   : register(t4);
 Texture2D<float4> InSpecularAlbedo  : register(t5);
 Texture2D<float4> InSpecHitDist     : register(t6); // R specular ray length (hit distance)
+Texture2D<float>  InPrevLinearDepth : register(t7); // R previous-frame abs linear depth (for the MV depth delta)
 
 RWTexture2D<float4> OutRadiance       : register(u0); // RGB noisy radiance, A specular ray length
 RWTexture2D<float4> OutFusedAlbedo    : register(u1); // RGB max(spec,diff)
@@ -129,7 +132,8 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
         viewZ = (NearPlane * FarPlane) / max(denom, 1e-6);
     }
     viewZ = abs(viewZ);
-    OutLinearDepth[tid.xy] = clamp(viewZ, NearPlane, FarPlane);
+    float linDepth = clamp(viewZ, NearPlane, FarPlane);
+    OutLinearDepth[tid.xy] = linDepth;
 
     float3 color = InColor.Load(p).rgb;
 
@@ -140,10 +144,20 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float skyMask = (viewZ >= FarPlane * SkyThreshold) ? 1.0 : 0.0;
     OutSkipSignal[tid.xy] = float4(color, skyMask);
 
-    // Motion vectors -> UV space (PreviousUV - CurrentUV). B = depth delta (needs history; 0 for now).
-    // Missing (bit0 clear) -> zero motion (denoiser treats the pixel as static).
+    // Motion vectors -> UV space (PreviousUV - CurrentUV). B = abs linear depth delta (abs(prevLinZ) -
+    // abs(curLinZ)): reproject to the previous pixel via the MV and sample last frame's linear depth.
+    // Missing MV (bit0 clear) -> zero motion (denoiser treats the pixel as static).
     float2 mv = (InputMask & 1u) ? InMotionVectors.Load(p).xy : float2(0.0, 0.0);
-    OutMotionVectors[tid.xy] = float4(mv.x * MotionScaleX, mv.y * MotionScaleY, 0.0, 0.0);
+    float2 mvUV = float2(mv.x * MotionScaleX, mv.y * MotionScaleY);
+    float depthDelta = 0.0;
+    if (HasPrevDepth != 0u)
+    {
+        float2 prevPx = float2(tid.xy) + mvUV * float2((float) RenderWidth, (float) RenderHeight);
+        int2 ppi = clamp(int2(prevPx + 0.5), int2(0, 0), int2((int) RenderWidth - 1, (int) RenderHeight - 1));
+        float prevLinZ = InPrevLinearDepth.Load(int3(ppi, 0));
+        depthDelta = abs(prevLinZ) - abs(linDepth);
+    }
+    OutMotionVectors[tid.xy] = float4(mvUV, depthDelta, 0.0);
 
     // Normal (+ roughness) -> octahedral RG, B roughness, A material type (0 = default).
     // Missing (bit1 clear) -> facing normal (0,0,1) + mid roughness. Guard normalize against zero vectors.
