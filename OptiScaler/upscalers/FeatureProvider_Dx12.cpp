@@ -115,6 +115,24 @@ bool FeatureProvider_Dx12::ChangeFeature(Upscaler upscaler, ID3D12Device* device
     if (state.newBackend == Upscaler::Reset || dlssOnNonCapable)
         state.newBackend = cfg.Dx12Upscaler.value_or_default();
 
+    // FFX-MLD Ray Regeneration (the DLSSD slot on non-DLSS GPUs) cannot be torn down and recreated
+    // in-session: ChangeFeature DelayedDestroy's the old feature, so a SECOND denoiser context is created
+    // while the first is still alive, and the FFX denoiser DLL faults the GPU a frame later (device removed
+    // -> crash). If RR is already running and the target is still RR (e.g. the user pressed Apply after
+    // moving a tuning slider), skip the recreate and keep the working context. RR tuning/profile changes
+    // therefore take effect on the next game launch (the ini is read at first context creation).
+    if (contextData->feature != nullptr && contextData->feature->IsInited() &&
+        contextData->feature->GetUpscalerType() == Upscaler::DLSSD && state.newBackend == Upscaler::DLSSD &&
+        !IdentifyGpu::getPrimaryGpu().dlssCapable)
+    {
+        LOG_WARN("Ray Regen is already active; skipping unsafe in-session recreate (would crash the GPU). "
+                 "Restart the game to apply Ray Regeneration changes.");
+        state.changeBackend[handleId] = false;
+        state.newBackend = Upscaler::Reset;
+        contextData->changeBackendCounter = 0;
+        return false;
+    }
+
     contextData->changeBackendCounter++;
 
     LOG_INFO("changeBackend is true, counter: {0}", contextData->changeBackendCounter);
