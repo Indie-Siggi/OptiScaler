@@ -205,7 +205,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
 
     unsigned int reset = 0;
     InParameters->Get(NVSDK_NGX_Parameter_Reset, &reset);
-    dispatchDesc.flags = (reset == 1 || _resetHistory) ? FFX_DENOISER_DISPATCH_RESET : 0;
+    const bool isReset = (reset == 1 || _resetHistory);
+    dispatchDesc.flags = isReset ? FFX_DENOISER_DISPATCH_RESET : 0;
     _resetHistory = false;
 
     dispatchDesc.frameIndex = static_cast<uint32_t>(_frameCount);
@@ -395,8 +396,10 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrc.DepthMatC = depthMatC;
     rrc.DepthMatD = depthMatD;
     rrc.HasDepthMatrix = hasDepthMatrix;
-    // Compute the MV depth delta once history exists (>0 frames) and reprojection is enabled.
-    rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0) ? 1u : 0u;
+    // Compute the MV depth delta once history exists (>0 frames) and reprojection is enabled. Skip it on a
+    // reset/camera-cut frame: the previous linear-depth buffer is stale across the cut, so a delta from it
+    // would mis-validate temporal reprojection for that frame.
+    rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0 && !isReset) ? 1u : 0u;
 
     if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb, inSpecHit))
     {
