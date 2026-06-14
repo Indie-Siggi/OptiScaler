@@ -47,8 +47,9 @@ struct alignas(256) RRConstants
 //
 // Produces the MLD 1-signal inputs from the intercepted DLSS-RR buffers:
 //   linearDepth (abs linear), motionVectors (RG=UV, B=depth delta), normals (RG=octahedral,
-//   B=linear roughness, A=material), specular/diffuse albedo (linear; dispatch sets
-//   FFX_DENOISER_DISPATCH_NON_GAMMA_ALBEDO), fusedAlbedo = max(spec,diff), radiance (noisy colour).
+//   B=linear roughness, A=material), specular/diffuse albedo (sqrt-encoded; NON_GAMMA OFF),
+//   fusedAlbedo = sqrt(max(spec,diff)), radiance (DEMODULATED colour = color/fusedLinear; the
+//   resolve pass re-modulates). See OPTISCALER_RR_PLAN.md Appendix A3.6.
 inline static std::string shaderCode = R"(
 cbuffer Params : register(b0)
 {
@@ -172,20 +173,24 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     }
     OutNormals[tid.xy] = float4(OctEncode(n), roughness, 0.0);
 
-    // Albedo: linear pass-through; dispatch sets NON_GAMMA. Missing (bits2/3 clear) -> 0.
+    // Albedo guides -> sqrt-encoded to match AMD's MLD convention (trace_rays_denoiser.hlsl:265-266,280;
+    // dispatch leaves NON_GAMMA OFF). Keep the LINEAR albedo (`fused`) for the radiance demod/remod math.
+    // Missing (bits2/3 clear) -> 0.
     float3 diff = (InputMask & 4u) ? InDiffuseAlbedo.Load(p).rgb : float3(0.0, 0.0, 0.0);
     float3 spec = (InputMask & 8u) ? InSpecularAlbedo.Load(p).rgb : float3(0.0, 0.0, 0.0);
-    OutDiffuseAlbedo[tid.xy]  = float4(diff, 1.0);
-    OutSpecularAlbedo[tid.xy] = float4(spec, 1.0);
-    // Fused albedo is the MLD denoiser's internal (de)modulation guide. It must NEVER be 0: a zero guide
-    // divides the radiance to black (the black-sky bug when a game feeds no albedo). Epsilon-clamp the real
-    // albedo (the oracle adds +0.01); use a neutral 1.0 when no albedo was provided -> identity guide.
+    OutDiffuseAlbedo[tid.xy]  = float4(sqrt(max(diff, 0.0)), 1.0);
+    OutSpecularAlbedo[tid.xy] = float4(sqrt(max(spec, 0.0)), 1.0);
+    // `fused` is the LINEAR fused albedo: it demodulates the radiance here and re-modulates it in the resolve.
+    // It must NEVER be 0: a zero guide divides the radiance to black (the black-sky bug when a game feeds no
+    // albedo). Epsilon-clamp the real albedo (the oracle adds +0.01); neutral 1.0 when none -> identity guide.
+    // The stored guide is sqrt(fused) (AMD stores sqrt(fusedAlbedo) and decodes via Square in compose).
     float3 fused = ((InputMask & (4u | 8u)) != 0u) ? max(max(spec, diff), 0.01) : float3(1.0, 1.0, 1.0);
-    OutFusedAlbedo[tid.xy] = float4(fused, 1.0);
+    OutFusedAlbedo[tid.xy] = float4(sqrt(fused), 1.0);
 
-    // Radiance (noisy). FFX 1-signal wants RGB composited radiance + A = specular ray length (in-only),
-    // so feed the specular hit distance into .a (fixes the smeared reflections). Optional per-game demod
-    // by fused albedo (off by default: the denoiser demodulates internally with the real fusedAlbedo guide).
+    // Radiance (noisy). FFX 1-signal denoises in DEMODULATED (lighting) space: feed color / fusedLinear and
+    // let the resolve pass re-modulate the denoised result by the same fused (AMD: trace_rays_denoiser.hlsl:274
+    // + denoiser_compose.hlsl:156). RGB demodulated radiance + A = specular ray length (in-only), so feed the
+    // specular hit distance into .a. DemodulateRadiance MUST stay paired with the resolve's ReModulate flag.
     float3 radiance = color;
     if (DemodulateRadiance != 0)
         radiance = radiance / max(fused, 1e-4);

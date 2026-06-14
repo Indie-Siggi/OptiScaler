@@ -428,7 +428,7 @@ class Config
     CustomOptional<float> RrMotionScaleX { 1.0f };    // NGX motion vectors -> UV (PreviousUV - CurrentUV)
     CustomOptional<float> RrMotionScaleY { 1.0f };
     CustomOptional<bool> RrNormalsArePacked { true }; // normals stored as n * 0.5 + 0.5
-    CustomOptional<bool> RrDemodulateRadiance { false }; // divide noisy colour by fused albedo
+    CustomOptional<bool> RrDemodulateRadiance { true }; // demod noisy colour by fused albedo (resolve re-modulates); MLD 1-signal denoises in lighting space
     CustomOptional<bool> RrReversedZ { true };        // device depth is reversed-Z (1=near, 0=far)
     CustomOptional<float> RrSkyThreshold { 0.999f };  // viewZ >= FarPlane * this marks a sky pixel (skip-signal)
     CustomOptional<int> RrDebugView { 0 };            // 0 = normal; 1 depth, 2 normals, 3 roughness, 4 MV,

@@ -10,12 +10,12 @@
 // AMD FSR Ray Regeneration (FFX-MLD) backend. See RayRegenFeature_Dx12.h and
 // OPTISCALER_RR_PLAN.md "Path B" for the NGX-RR -> MLD 1-signal mapping.
 //
-// SCAFFOLD STATE (Phase 1): the denoiser context is created and dispatched for real, but the
-// NGX-RR inputs are passed through raw rather than converted into MLD encodings. The conversion
-// shader (Phase 2) must still: linearize depth, octahedral-encode normals (+roughness/material),
-// sqrt-encode albedo, build fusedAlbedo = sqrt(max(spec,diff)), pack UV motion vectors + depth
-// delta, and demodulate the radiance. Until then the visual result is not correct, but the path
-// compiles, links, creates the context, and dispatches end to end.
+// The conversion shader (shaders/rr_convert/RR_Common.h) re-encodes the intercepted NGX-RR inputs into
+// the MLD 1-signal contract: abs linear depth, octahedral normals (+roughness/material), sqrt-encoded
+// albedo, fusedAlbedo = sqrt(max(spec,diff)), UV motion vectors + depth delta, and a DEMODULATED radiance
+// (color / fusedLinear). MLD denoises in demodulated (lighting) space; the resolve pass (RR_Resolve_Common.h)
+// re-modulates the denoised radiance by fusedLinear and recomposes the sky. The demod (here) and remod
+// (resolve) are paired via DemodulateRadiance / ReModulate. See OPTISCALER_RR_PLAN.md Appendix A3.6.
 
 namespace
 {
@@ -470,8 +470,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // Make the converted inputs readable by the denoiser.
     _convert->TransitionOutputs(InCommandList, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    // Albedo is passed linear, so tell MLD not to assume sqrt encoding.
-    dispatchDesc.flags |= FFX_DENOISER_DISPATCH_NON_GAMMA_ALBEDO;
+    // Albedo guides are sqrt-encoded in the conversion shader (AMD's MLD convention; see RR_Common.h +
+    // OPTISCALER_RR_PLAN.md A3.6), so NON_GAMMA is intentionally NOT set: the denoiser assumes sqrt albedo.
 
     // Always-bound guide buffers (from the converter).
     dispatchDesc.linearDepth = ffxApiGetResourceDX12(_convert->LinearDepth(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
@@ -517,6 +517,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrr.DebugView = debugView;
     rrr.NearPlane = camNear;
     rrr.FarPlane = camFar;
+    // Re-modulate the denoised radiance by fused albedo iff the conversion demodulated it (MLD 1-signal
+    // denoises in lighting space; the two must stay paired). See RR_Resolve_Common.h + A3.6.
+    rrr.ReModulate = _profile.demodulateRadiance ? 1u : 0u;
 
     {
         ScopedGpuMarker marker(InCommandList, "RR Resolve (recompose/debug)");

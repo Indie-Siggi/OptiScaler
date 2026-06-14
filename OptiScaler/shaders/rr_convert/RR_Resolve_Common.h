@@ -19,6 +19,7 @@ struct alignas(256) RRResolveConstants
     uint32_t DebugView; // 0 = recompose; 1..8 = visualize a converted signal (see shaderCode)
     float NearPlane;    // for normalizing the linear-depth debug view
     float FarPlane;
+    uint32_t ReModulate; // 1 = re-modulate denoised radiance by fused albedo (pair with conversion DemodulateRadiance)
 };
 
 inline static std::string resolveShaderCode = R"(
@@ -29,6 +30,7 @@ cbuffer Params : register(b0)
     uint  DebugView;
     float NearPlane;
     float FarPlane;
+    uint  ReModulate; // 1 = re-modulate the denoised radiance by fused albedo
 };
 
 Texture2D<float4> InDenoised : register(t0); // MLD denoiser output (intermediate)
@@ -51,10 +53,20 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 
     if (DebugView == 0)
     {
-        // Recomposition: pull the sky back in from the skip-signal where the denoiser zeroed it.
+        // Recomposition. MLD 1-signal denoises in DEMODULATED (lighting) space, so re-modulate the denoised
+        // radiance by the fused albedo (AMD does this in denoiser_compose.hlsl:156 via Square(fusedGuide)).
+        // ReModulate is paired with the conversion's DemodulateRadiance: skip it if the radiance was fed
+        // modulated. Then pull the sky back in from the skip-signal where the denoiser zeroed it (the sky's
+        // skip colour is the original modulated colour, so it is composited after re-modulation).
         float4 d = InDenoised.Load(p);
         float4 s = InSkip.Load(p);
-        OutColor[tid.xy] = float4(lerp(d.rgb, s.rgb, saturate(s.a)), d.a);
+        float3 lit = d.rgb;
+        if (ReModulate != 0)
+        {
+            float3 fusedLinear = InFused.Load(p).rgb; // stored sqrt(fused)
+            lit = lit * (fusedLinear * fusedLinear);  // decode (Square) then re-modulate
+        }
+        OutColor[tid.xy] = float4(lerp(lit, s.rgb, saturate(s.a)), d.a);
         return;
     }
 
