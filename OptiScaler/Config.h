@@ -452,6 +452,9 @@ class Config
     // radiance *= RadianceScale * (UseExposureTexture ? game's NGX ExposureTexture : 1).
     CustomOptional<float> RrRadianceScale { 1.0f };
     CustomOptional<bool> RrUseExposureTexture { false };
+    // Run FSR (native-AA / upscale) after the denoiser, like AMD's own pipeline: the game hands DLSS-RR a jittered,
+    // un-anti-aliased frame and expects it back anti-aliased. Applies at RR creation (game restart).
+    CustomOptional<bool> RrFsrAntiAliasing { true };
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };

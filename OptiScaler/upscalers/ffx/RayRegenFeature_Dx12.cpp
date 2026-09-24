@@ -6,6 +6,7 @@
 #include <NVNGX_Parameter.h>
 #include <proxies/FfxApi_Proxy.h>
 #include "RayRegenFeature_Dx12.h"
+#include "ffx_upscale.h"
 
 // AMD FSR Ray Regeneration (FFX-MLD) backend. See RayRegenFeature_Dx12.h and
 // OPTISCALER_RR_PLAN.md "Path B" for the NGX-RR -> MLD 1-signal mapping.
@@ -102,6 +103,59 @@ void RayRegenFeatureDx12::ReleaseDenoiserContext()
         FfxApiProxy::D3D12_DestroyContext(&_denoiserContext, nullptr);
         _denoiserContext = nullptr;
     }
+
+    if (_upscaleContext != nullptr)
+    {
+        FfxApiProxy::D3D12_DestroyContext(&_upscaleContext, nullptr);
+        _upscaleContext = nullptr;
+    }
+}
+
+bool RayRegenFeatureDx12::CreateUpscalerContext()
+{
+    if (!FfxApiProxy::IsSRReady())
+    {
+        LOG_WARN("RR: no FFX upscaler loaded; FSR anti-aliasing after the denoiser disabled");
+        return false;
+    }
+
+    ffxCreateContextDescUpscale upscaleDesc = { 0 };
+    upscaleDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+    upscaleDesc.maxRenderSize = { _maxRenderWidth, _maxRenderHeight };
+    upscaleDesc.maxUpscaleSize = { _outputWidth, _outputHeight };
+
+    // Same NGX -> FFX flag mapping as FFXFeature::InitFlags (this feature does not run SetInitParameters).
+    upscaleDesc.flags = 0;
+    if (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_IsHDR)
+        upscaleDesc.flags |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
+    if (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted)
+        upscaleDesc.flags |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
+    if (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_MVJittered)
+        upscaleDesc.flags |= FFX_UPSCALE_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION;
+    if (!(_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes))
+        upscaleDesc.flags |= FFX_UPSCALE_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS;
+    if (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_AutoExposure)
+        upscaleDesc.flags |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
+
+    ffxCreateBackendDX12Desc backendDesc = { 0 };
+    backendDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+    backendDesc.device = Device;
+    upscaleDesc.header.pNext = &backendDesc.header;
+
+    ScopedSkipHeapCapture skipHeapCapture {};
+    auto ret = FfxApiProxy::D3D12_CreateContext(&_upscaleContext, &upscaleDesc.header, nullptr);
+    if (ret != FFX_API_RETURN_OK)
+    {
+        LOG_ERROR("RR: FSR upscaler context error: {0}; continuing without FSR anti-aliasing",
+                  FfxApiProxy::ReturnCodeToString(ret));
+        _upscaleContext = nullptr;
+        return false;
+    }
+
+    LOG_INFO("RR: FSR anti-aliasing context created (render max {0}x{1} -> {2}x{3}, NGX flags 0x{4:x}, FFX flags "
+             "0x{5:x})",
+             _maxRenderWidth, _maxRenderHeight, _outputWidth, _outputHeight, _ngxCreateFlags, upscaleDesc.flags);
+    return true;
 }
 
 void RayRegenFeatureDx12::ApplyDenoiserTuning()
@@ -185,6 +239,9 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     InParameters->Get(NVSDK_NGX_Parameter_OutHeight, &outHeight);
     _maxRenderWidth = (outWidth > _renderWidth) ? outWidth : _renderWidth;
     _maxRenderHeight = (outHeight > _renderHeight) ? outHeight : _renderHeight;
+    _outputWidth = (outWidth > 0) ? outWidth : _maxRenderWidth;
+    _outputHeight = (outHeight > 0) ? outHeight : _maxRenderHeight;
+    InParameters->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &_ngxCreateFlags);
 
     ffxCreateContextDescDenoiser denoiserDesc = { 0 };
     denoiserDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_DENOISER;
@@ -220,6 +277,9 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     // restart: the menu's "Apply" button recreates the feature, which re-enters this path.
     ApplyDenoiserTuning();
 
+    if (Config::Instance()->RrFsrAntiAliasing.value_or_default())
+        CreateUpscalerContext();
+
     _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
     if (_convert == nullptr || !_convert->IsInit())
     {
@@ -236,6 +296,78 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
 
     _resetHistory = true;
     SetInit(true);
+    return true;
+}
+
+bool RayRegenFeatureDx12::DispatchUpscaler(ID3D12GraphicsCommandList* InCommandList,
+                                           NVSDK_NGX_Parameter* InParameters, ID3D12Resource* InDepth,
+                                           ID3D12Resource* InMotionVectors, ID3D12Resource* InExposure,
+                                           ID3D12Resource* InOutput, bool InReset, float InCamNear, float InCamFar,
+                                           float InCamFov, float InFrameTimeMs)
+{
+    auto resolveTypeless = [](uint32_t& format)
+    {
+        switch (format)
+        {
+        case FFX_API_SURFACE_FORMAT_R10G10B10A2_TYPELESS: format = FFX_API_SURFACE_FORMAT_R10G10B10A2_UNORM; return;
+        case FFX_API_SURFACE_FORMAT_R32G32B32A32_TYPELESS: format = FFX_API_SURFACE_FORMAT_R32G32B32A32_FLOAT; return;
+        case FFX_API_SURFACE_FORMAT_R16G16B16A16_TYPELESS: format = FFX_API_SURFACE_FORMAT_R16G16B16A16_FLOAT; return;
+        case FFX_API_SURFACE_FORMAT_R32G32_TYPELESS: format = FFX_API_SURFACE_FORMAT_R32G32_FLOAT; return;
+        case FFX_API_SURFACE_FORMAT_R8G8B8A8_TYPELESS: format = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM; return;
+        case FFX_API_SURFACE_FORMAT_R16G16_TYPELESS: format = FFX_API_SURFACE_FORMAT_R16G16_FLOAT; return;
+        case FFX_API_SURFACE_FORMAT_R32_TYPELESS: format = FFX_API_SURFACE_FORMAT_R32_FLOAT; return;
+        case FFX_API_SURFACE_FORMAT_R16_TYPELESS: format = FFX_API_SURFACE_FORMAT_R16_FLOAT; return;
+        default: return;
+        }
+    };
+
+    ffxDispatchDescUpscale up = { 0 };
+    up.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
+    up.commandList = InCommandList;
+    up.color = ffxApiGetResourceDX12(_resolve->Composited(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    up.depth = ffxApiGetResourceDX12(InDepth, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    up.motionVectors = ffxApiGetResourceDX12(InMotionVectors, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    if (InExposure != nullptr)
+        up.exposure = ffxApiGetResourceDX12(InExposure, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    up.output = ffxApiGetResourceDX12(InOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+    resolveTypeless(up.color.description.format);
+    resolveTypeless(up.depth.description.format);
+    resolveTypeless(up.motionVectors.description.format);
+    resolveTypeless(up.exposure.description.format);
+    resolveTypeless(up.output.description.format);
+
+    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &up.jitterOffset.x);
+    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &up.jitterOffset.y);
+
+    // FSR takes the game's own MVs, which NGX MV.Scale maps to pixels (same as FFXFeature_Dx12).
+    up.motionVectorScale = { 1.0f, 1.0f };
+    InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_X, &up.motionVectorScale.x);
+    InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &up.motionVectorScale.y);
+
+    up.renderSize = { _renderWidth, _renderHeight };
+    up.upscaleSize = { _outputWidth, _outputHeight };
+    up.enableSharpening = false;
+    up.sharpness = 0.0f;
+    up.frameTimeDelta = InFrameTimeMs;
+    if (InParameters->Get(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, &up.preExposure) != NVSDK_NGX_Result_Success ||
+        up.preExposure <= 0.0f)
+        up.preExposure = 1.0f;
+    up.reset = InReset;
+    // FFX wants near/far swapped for inverted depth (as FFXFeature_Dx12 does).
+    const bool inverted = (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted) != 0;
+    up.cameraNear = inverted ? InCamFar : InCamNear;
+    up.cameraFar = inverted ? InCamNear : InCamFar;
+    up.cameraFovAngleVertical = InCamFov;
+    up.viewSpaceToMetersFactor = 0.0f;
+    up.flags = 0;
+
+    auto ret = FfxApiProxy::D3D12_Dispatch(&_upscaleContext, &up.header);
+    if (ret != FFX_API_RETURN_OK)
+    {
+        LOG_ERROR("RR: FSR anti-aliasing dispatch error: {0}", FfxApiProxy::ReturnCodeToString(ret));
+        return false;
+    }
+
     return true;
 }
 
@@ -453,6 +585,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
         LOG_WARN("RR: missing core input(s) (mask 0x{0:x}); using neutral defaults", inputMask);
 
     // Bind a valid stand-in for any missing optional input; the shader ignores it via the mask.
+    // Keep the game's own MV/exposure for the FSR pass (the stand-ins below are only for our shaders).
+    ID3D12Resource* gameMv = inMv;
+    ID3D12Resource* gameExposure = inExposure;
     if (inMv == nullptr)      inMv = inColor;
     if (inNormals == nullptr) inNormals = inColor;
     if (inDiffAlb == nullptr) inDiffAlb = inColor;
@@ -575,15 +710,32 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrr.RadianceScale = radianceScale;
     rrr.UseExposure = useExposure ? 1u : 0u;
 
+    // Normal view: denoised + re-modulated -> FSR anti-aliasing -> app output (AMD's denoiser -> upscaler order).
+    // Debug views and the no-FSR fallback write the app output directly.
+    const bool useFsr = (debugView == 0 && _upscaleContext != nullptr && gameMv != nullptr);
+    ID3D12Resource* resolveTarget = useFsr ? _resolve->Composited() : inOutput;
+    if (useFsr)
+        _resolve->TransitionComposited(InCommandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
     {
         ScopedGpuMarker marker(InCommandList, "RR Resolve (recompose/debug)");
         if (!_resolve->Dispatch(InCommandList, rrr, _convert->SkipSignal(), _convert->Radiance(),
                                 _convert->LinearDepth(), _convert->MotionVectors(), _convert->Normals(),
-                                _convert->FusedAlbedo(), inExposure, inOutput))
+                                _convert->FusedAlbedo(), inExposure, resolveTarget))
         {
             LOG_ERROR("RR resolve dispatch failed");
             return false;
         }
+    }
+
+    if (useFsr)
+    {
+        _resolve->TransitionComposited(InCommandList, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        ScopedGpuMarker marker(InCommandList, "RR FSR anti-aliasing");
+        if (!DispatchUpscaler(InCommandList, InParameters, inDepth, gameMv, useExposure ? gameExposure : nullptr,
+                              inOutput, isReset, camNear, camFar, camFov, frameTimeMs))
+            return false;
     }
 
     // Periodic diagnostic logging (RrDebugLog). CPU-side context (the camera-plane source is the prime

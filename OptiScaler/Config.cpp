@@ -281,6 +281,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             RrDisocclusionThreshold.set_from_config(readFloat("RayRegen", "DisocclusionThreshold"));
             RrRadianceScale.set_from_config(readFloat("RayRegen", "RadianceScale"));
             RrUseExposureTexture.set_from_config(readBool("RayRegen", "UseExposureTexture"));
+            RrFsrAntiAliasing.set_from_config(readBool("RayRegen", "FsrAntiAliasing"));
 
             if (auto setting = readInt("FSR", "Fsr4Model"); setting.has_value() && setting >= 0 && setting <= 5)
                 Fsr4Model.set_from_config(setting);
@@ -1065,6 +1066,7 @@ bool Config::SaveIni()
         ini.SetValue("RayRegen", "RadianceScale", GetFloatValue(Instance()->RrRadianceScale.value_for_config()).c_str());
         ini.SetValue("RayRegen", "UseExposureTexture",
                      GetBoolValue(Instance()->RrUseExposureTexture.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "FsrAntiAliasing", GetBoolValue(Instance()->RrFsrAntiAliasing.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());

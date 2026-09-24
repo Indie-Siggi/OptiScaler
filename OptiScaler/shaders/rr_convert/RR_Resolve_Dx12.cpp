@@ -30,6 +30,16 @@ bool RR_Resolve_Dx12::CreateBufferResources(ID3D12Device* InDevice, ID3D12Resour
 
     _denoised->SetName(L"RR_Denoised");
     _denoisedState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+    if (!Shader_Dx12::CreateBufferResource(InDevice, InRef, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, &_composited,
+                                           flags, InWidth, InHeight, kDenoisedFormat))
+    {
+        LOG_ERROR("[{0}] Failed to create the composited intermediate", _name);
+        return false;
+    }
+
+    _composited->SetName(L"RR_Composited");
+    _compositedState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     _width = InWidth;
     _height = InHeight;
     return true;
@@ -44,6 +54,16 @@ void RR_Resolve_Dx12::PrepareForDenoiser(ID3D12GraphicsCommandList* InCmdList)
                                                         D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     InCmdList->ResourceBarrier(1, &barrier);
     _denoisedState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+}
+
+void RR_Resolve_Dx12::TransitionComposited(ID3D12GraphicsCommandList* InCmdList, D3D12_RESOURCE_STATES InState)
+{
+    if (_composited == nullptr || InCmdList == nullptr || _compositedState == InState)
+        return;
+
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_composited, _compositedState, InState);
+    InCmdList->ResourceBarrier(1, &barrier);
+    _compositedState = InState;
 }
 
 bool RR_Resolve_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRResolveConstants& InConstants,
@@ -156,4 +176,5 @@ RR_Resolve_Dx12::~RR_Resolve_Dx12()
         _frameHeaps[i].ReleaseHeaps();
 
     SAFE_RELEASE(_denoised);
+    SAFE_RELEASE(_composited);
 }

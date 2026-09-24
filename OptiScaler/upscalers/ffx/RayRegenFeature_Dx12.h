@@ -39,6 +39,16 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     uint32_t _maxRenderHeight = 0;
     uint32_t _lastDebugView = 0;
     bool _warnedSubNative = false;
+    uint32_t _outputWidth = 0;
+    uint32_t _outputHeight = 0;
+
+    // FSR pass after the denoiser ([RayRegen] FsrAntiAliasing). The game hands DLSS-RR a jittered, un-anti-
+    // aliased frame and expects it back anti-aliased (in DLAA DLSS-RR is the game's TAA); MLD only denoises, so
+    // without this the re-modulated albedo aliases (leaf-edge specks, blotchy distant texture). AMD's own
+    // pipeline is denoiser -> FSR upscaler too, also at 1:1 ("Native AA").
+    ffxContext _upscaleContext = nullptr;
+    unsigned int _ngxCreateFlags = 0;
+    bool CreateUpscalerContext();
 
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
                                  FFX_DENOISER_VERSION_PATCH };
@@ -54,6 +64,10 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
 
     bool CreateDenoiserContext(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters);
     void ReleaseDenoiserContext();
+    bool DispatchUpscaler(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX_Parameter* InParameters,
+                          ID3D12Resource* InDepth, ID3D12Resource* InMotionVectors, ID3D12Resource* InExposure,
+                          ID3D12Resource* InOutput, bool InReset, float InCamNear, float InCamFar, float InCamFov,
+                          float InFrameTimeMs);
 
     // Push the [RayRegen] denoiser tuning floats (from _profile) into the denoiser once, at context
     // creation. Live per-frame ffxConfigure wedged the gfx ring, so changes apply only on RR restart.

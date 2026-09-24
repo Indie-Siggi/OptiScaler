@@ -25,6 +25,11 @@ class RR_Resolve_Dx12 : public Shader_Dx12
     ID3D12Resource* _denoised = nullptr;
     D3D12_RESOURCE_STATES _denoisedState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
+    // Recomposed (re-modulated + sky) image when an FSR pass follows: the resolve writes here instead of the
+    // app output, and FSR reads it as its colour input.
+    ID3D12Resource* _composited = nullptr;
+    D3D12_RESOURCE_STATES _compositedState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
     uint32_t _width = 0;
     uint32_t _height = 0;
 
@@ -38,6 +43,11 @@ class RR_Resolve_Dx12 : public Shader_Dx12
     // The MLD denoiser output target. Put it in UNORDERED_ACCESS first (PrepareForDenoiser).
     ID3D12Resource* Denoised() { return _denoised; }
     void PrepareForDenoiser(ID3D12GraphicsCommandList* InCmdList);
+
+    // Intermediate for the resolve -> FSR chain. Barrier to UNORDERED_ACCESS before passing it as the resolve
+    // output, then to NON_PIXEL_SHADER_RESOURCE before FSR reads it.
+    ID3D12Resource* Composited() { return _composited; }
+    void TransitionComposited(ID3D12GraphicsCommandList* InCmdList, D3D12_RESOURCE_STATES InState);
 
     // Recompose (or debug-visualize) into InOutput. The conversion outputs must already be in a
     // shader-read state (RR_Dx12::TransitionOutputs). _denoised is transitioned to read here.
