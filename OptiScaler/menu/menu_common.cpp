@@ -3275,6 +3275,20 @@ bool MenuCommon::RenderMenu()
                                     config->RrUseExposureTexture = ue;
                                 ShowHelpMarker("Also multiply by the game's NGX ExposureTexture (if it sets one).");
 
+                                const char* jitterModes[] = { "Pixels (header)", "NDC (AMD sample)", "None" };
+                                int jm = config->RrJitterMode.value_or_default();
+                                if (jm < 0 || jm > 2)
+                                    jm = 0;
+                                if (ImGui::Combo("Denoiser Jitter", &jm, jitterModes, IM_ARRAYSIZE(jitterModes)))
+                                    config->RrJitterMode = jm;
+                                ShowHelpMarker("Units of the camera jitter passed to the denoiser.\n"
+                                               "Compare edge stability while moving.");
+
+                                float fs = config->RrFsrSharpness.value_or_default();
+                                if (ImGui::SliderFloat("FSR Sharpness", &fs, 0.0f, 1.0f, "%.2f"))
+                                    config->RrFsrSharpness = fs;
+                                ShowHelpMarker("RCAS sharpening in the FSR pass after the denoiser. 0 = off.");
+
                                 ImGui::PopItemWidth();
                                 ImGui::Spacing();
                             }

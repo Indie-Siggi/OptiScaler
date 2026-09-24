@@ -282,6 +282,8 @@ bool Config::Reload(std::filesystem::path iniPath)
             RrRadianceScale.set_from_config(readFloat("RayRegen", "RadianceScale"));
             RrUseExposureTexture.set_from_config(readBool("RayRegen", "UseExposureTexture"));
             RrFsrAntiAliasing.set_from_config(readBool("RayRegen", "FsrAntiAliasing"));
+            RrJitterMode.set_from_config(readInt("RayRegen", "JitterMode"));
+            RrFsrSharpness.set_from_config(readFloat("RayRegen", "FsrSharpness"));
 
             if (auto setting = readInt("FSR", "Fsr4Model"); setting.has_value() && setting >= 0 && setting <= 5)
                 Fsr4Model.set_from_config(setting);
@@ -1067,6 +1069,8 @@ bool Config::SaveIni()
         ini.SetValue("RayRegen", "UseExposureTexture",
                      GetBoolValue(Instance()->RrUseExposureTexture.value_for_config()).c_str());
         ini.SetValue("RayRegen", "FsrAntiAliasing", GetBoolValue(Instance()->RrFsrAntiAliasing.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "JitterMode", GetIntValue(Instance()->RrJitterMode.value_for_config()).c_str());
+        ini.SetValue("RayRegen", "FsrSharpness", GetFloatValue(Instance()->RrFsrSharpness.value_for_config()).c_str());
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());

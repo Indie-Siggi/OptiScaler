@@ -346,8 +346,9 @@ bool RayRegenFeatureDx12::DispatchUpscaler(ID3D12GraphicsCommandList* InCommandL
 
     up.renderSize = { _renderWidth, _renderHeight };
     up.upscaleSize = { _outputWidth, _outputHeight };
-    up.enableSharpening = false;
-    up.sharpness = 0.0f;
+    const float sharpness = Config::Instance()->RrFsrSharpness.value_or_default();
+    up.enableSharpening = sharpness > 0.0f;
+    up.sharpness = (sharpness > 1.0f) ? 1.0f : ((sharpness > 0.0f) ? sharpness : 0.0f);
     up.frameTimeDelta = InFrameTimeMs;
     if (InParameters->Get(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, &up.preExposure) != NVSDK_NGX_Result_Success ||
         up.preExposure <= 0.0f)
@@ -427,8 +428,19 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     if (!(radianceScale > 0.0f))
         radianceScale = 1.0f;
 
-    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &dispatchDesc.jitterOffsets.x);
-    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &dispatchDesc.jitterOffsets.y);
+    // NGX jitter is in pixels (same sign as FSR's). The header asks for pixels, but AMD's own sample feeds the
+    // camera's NDC jitter offsets ((-2*jx/W, 2*jy/H) of its FFX-queried jitter = (2*jx/W, -2*jy/H) in FSR sign),
+    // so the convention is live-selectable ([RayRegen] JitterMode) to A/B edge stability in motion.
+    float ngxJitterX = 0.0f, ngxJitterY = 0.0f;
+    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &ngxJitterX);
+    InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &ngxJitterY);
+    const int jitterMode = Config::Instance()->RrJitterMode.value_or_default();
+    if (jitterMode == 1 && _renderWidth > 0 && _renderHeight > 0)
+        dispatchDesc.jitterOffsets = { 2.0f * ngxJitterX / (float) _renderWidth, -2.0f * ngxJitterY / (float) _renderHeight };
+    else if (jitterMode == 2)
+        dispatchDesc.jitterOffsets = { 0.0f, 0.0f };
+    else
+        dispatchDesc.jitterOffsets = { ngxJitterX, ngxJitterY };
 
     unsigned int reset = 0;
     InParameters->Get(NVSDK_NGX_Parameter_Reset, &reset);
@@ -596,9 +608,10 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     if (inExposure == nullptr) inExposure = inColor;
 
     // The bridge denoises without upscaling, so a sub-native render only covers part of the output.
-    if (!_warnedSubNative && (_renderWidth < _maxRenderWidth || _renderHeight < _maxRenderHeight))
+    if (!_warnedSubNative && _upscaleContext == nullptr &&
+        (_renderWidth < _maxRenderWidth || _renderHeight < _maxRenderHeight))
     {
-        LOG_WARN("RR: render {0}x{1} is below the output {2}x{3}; the bridge is DLAA-only, select DLAA/native",
+        LOG_WARN("RR: render {0}x{1} is below the output {2}x{3} and FSR is off; select DLAA/native or FsrAntiAliasing",
                  _renderWidth, _renderHeight, _maxRenderWidth, _maxRenderHeight);
         _warnedSubNative = true;
     }
@@ -642,7 +655,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // Compute the MV depth delta once history exists (>0 frames) and reprojection is enabled. Skip it on a
     // reset/camera-cut frame: the previous linear-depth buffer is stale across the cut, so a delta from it
     // would mis-validate temporal reprojection for that frame.
-    rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0 && !isReset) ? 1u : 0u;
+    // Always on: MLD finds disocclusions from this depth delta (it has no mask input), independent of whether the
+    // camera basis is trusted ([RayRegen] Reprojection only gates the camera basis).
+    rrc.HasPrevDepth = (_frameCount > 0 && !isReset) ? 1u : 0u;
     rrc.RadianceScale = radianceScale;
     rrc.UseExposure = useExposure ? 1u : 0u;
 
@@ -754,6 +769,9 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
                  "camPos=({7:.2f},{8:.2f},{9:.2f}) posDelta=({10:.4f},{11:.4f},{12:.4f})",
                  reprojValid, camRight[0], camRight[1], camRight[2], camFwd[0], camFwd[1], camFwd[2], camPos[0],
                  camPos[1], camPos[2], posDelta[0], posDelta[1], posDelta[2]);
+        LOG_INFO("RR-debug jitter: mode={0} ngx=({1:.4f},{2:.4f}) denoiser=({3:.6f},{4:.6f}) fsrSharpness={5:.2f}",
+                 jitterMode, ngxJitterX, ngxJitterY, dispatchDesc.jitterOffsets.x, dispatchDesc.jitterOffsets.y,
+                 Config::Instance()->RrFsrSharpness.value_or_default());
         LOG_INFO("RR-debug scale: max={0}x{1} ngxMvScale=({2:.1f},{3:.1f}) mvScale=({4:.5f},{5:.5f}) "
                  "radianceScale={6:.5f} useExposure={7} exposureTex={8}",
                  _maxRenderWidth, _maxRenderHeight, ngxMvScaleX, ngxMvScaleY, mvScaleX, mvScaleY, radianceScale,

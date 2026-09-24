@@ -455,6 +455,11 @@ class Config
     // Run FSR (native-AA / upscale) after the denoiser, like AMD's own pipeline: the game hands DLSS-RR a jittered,
     // un-anti-aliased frame and expects it back anti-aliased. Applies at RR creation (game restart).
     CustomOptional<bool> RrFsrAntiAliasing { true };
+    // Live. Jitter handed to the denoiser: 0 = NGX pixels (as the header documents), 1 = AMD sample convention
+    // (camera NDC offsets, (2*jx/W, -2*jy/H) in NGX/FSR sign), 2 = none.
+    CustomOptional<int> RrJitterMode { 0 };
+    // Live. RCAS sharpening in the FSR pass after the denoiser; 0 = off.
+    CustomOptional<float> RrFsrSharpness { 0.0f };
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };
