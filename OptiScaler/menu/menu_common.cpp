@@ -3243,6 +3243,42 @@ bool MenuCommon::RenderMenu()
                         // -1 = leave the denoiser's internal default.
                         if (usesDlssd)
                         {
+                            // Live: plain shader constants read every frame, safe to change mid-session.
+                            if (auto chRRLive = ScopedCollapsingHeader("Ray Regeneration - Live Debug");
+                                chRRLive.IsHeaderOpen())
+                            {
+                                ScopedIndent indentRRLive {};
+                                ImGui::PushItemWidth(220.0f * menuResScale);
+
+                                const char* views[] = { "0 Normal",         "1 Depth",        "2 Normals",
+                                                        "3 Roughness",      "4 Motion",       "5 Fused albedo",
+                                                        "6 Noisy radiance", "7 Sky mask",     "8 Denoised" };
+                                int dv = config->RrDebugView.value_or_default();
+                                if (dv < 0 || dv > 8)
+                                    dv = 0;
+                                if (ImGui::Combo("Debug View", &dv, views, IM_ARRAYSIZE(views)))
+                                    config->RrDebugView = dv;
+                                ShowHelpMarker("1..7 show a converted input and skip the denoiser.\n"
+                                               "6 and 8 are demodulated lighting in the same units:\n"
+                                               "compare them to see what the denoiser itself does.");
+
+                                float rs = config->RrRadianceScale.value_or_default();
+                                if (ImGui::DragFloat("Radiance Scale", &rs, 0.001f, 0.0001f, 100.0f, "%.4f",
+                                                     ImGuiSliderFlags_Logarithmic))
+                                    config->RrRadianceScale = rs;
+                                ShowHelpMarker("Scales the demodulated radiance into the denoiser and back out\n"
+                                               "after it. 1 = off. Tests whether the denoiser wants a\n"
+                                               "normalized range (e.g. pre-exposure HDR games).");
+
+                                bool ue = config->RrUseExposureTexture.value_or_default();
+                                if (ImGui::Checkbox("Use Game Exposure", &ue))
+                                    config->RrUseExposureTexture = ue;
+                                ShowHelpMarker("Also multiply by the game's NGX ExposureTexture (if it sets one).");
+
+                                ImGui::PopItemWidth();
+                                ImGui::Spacing();
+                            }
+
                             if (auto chRR = ScopedCollapsingHeader("Ray Regeneration - Denoiser Tuning");
                                 chRR.IsHeaderOpen())
                             {

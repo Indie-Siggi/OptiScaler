@@ -116,13 +116,14 @@ void RR_Dx12::TransitionOutputs(ID3D12GraphicsCommandList* InCmdList, D3D12_RESO
 bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& InConstants, ID3D12Resource* InColor,
                        ID3D12Resource* InDepth, ID3D12Resource* InMotionVectors, ID3D12Resource* InNormalRoughness,
                        ID3D12Resource* InDiffuseAlbedo, ID3D12Resource* InSpecularAlbedo,
-                       ID3D12Resource* InSpecularHitDistance)
+                       ID3D12Resource* InSpecularHitDistance, ID3D12Resource* InExposure)
 {
     if (!_init || _device == nullptr || InCmdList == nullptr || !CanRender())
         return false;
 
     if (InColor == nullptr || InDepth == nullptr || InMotionVectors == nullptr || InNormalRoughness == nullptr ||
-        InDiffuseAlbedo == nullptr || InSpecularAlbedo == nullptr || InSpecularHitDistance == nullptr)
+        InDiffuseAlbedo == nullptr || InSpecularAlbedo == nullptr || InSpecularHitDistance == nullptr ||
+        InExposure == nullptr)
     {
         LOG_ERROR("[{0}] missing input resource", _name);
         return false;
@@ -159,7 +160,7 @@ bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& 
     _counter = (_counter + 1) % RR_NUM_OF_HEAPS;
     FrameDescriptorHeap& heap = _frameHeaps[_counter];
 
-    // SRVs t0..t6
+    // SRVs t0..t8
     CreateShaderResourceView(_device, InColor, heap.GetSrvCPU(0));
     CreateShaderResourceView(_device, InDepth, heap.GetSrvCPU(1));
     CreateShaderResourceView(_device, InMotionVectors, heap.GetSrvCPU(2));
@@ -168,6 +169,7 @@ bool RR_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRConstants& 
     CreateShaderResourceView(_device, InSpecularAlbedo, heap.GetSrvCPU(5));
     CreateShaderResourceView(_device, InSpecularHitDistance, heap.GetSrvCPU(6));
     CreateShaderResourceView(_device, _linearDepthHistory, heap.GetSrvCPU(7)); // t7 previous-frame linear depth
+    CreateShaderResourceView(_device, InExposure, heap.GetSrvCPU(8));          // t8 exposure (read iff UseExposure)
 
     // UAVs u0..u7 (image outputs)
     for (int i = 0; i < RR_NUM_OUTPUTS; i++)
@@ -258,8 +260,8 @@ RR_Dx12::RR_Dx12(std::string InName, ID3D12Device* InDevice) : Shader_Dx12(InNam
 
     LOG_DEBUG("{0} start!", _name);
 
-    // 8 SRVs (+ spec hit distance + prev linear depth), RR_NUM_OUTPUTS image UAVs + 1 debug buffer UAV, 1 CBV.
-    if (!SetupRootSignature(InDevice, 8, RR_NUM_OUTPUTS + 1, 1))
+    // 9 SRVs (+ spec hit distance, prev linear depth, exposure), RR_NUM_OUTPUTS image UAVs + 1 debug UAV, 1 CBV.
+    if (!SetupRootSignature(InDevice, 9, RR_NUM_OUTPUTS + 1, 1))
     {
         LOG_ERROR("Failed to setup root signature");
         return;

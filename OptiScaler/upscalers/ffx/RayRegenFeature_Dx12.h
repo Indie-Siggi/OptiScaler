@@ -33,6 +33,13 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     bool _prevCamPosValid = false;
     bool _resetHistory = true;
 
+    // Context + conversion buffers are sized max(render, display): games (Crimson Desert) create DLSS-D via the
+    // Quality optimal-settings query and then render at DLAA, and the context cannot be recreated in-session.
+    uint32_t _maxRenderWidth = 0;
+    uint32_t _maxRenderHeight = 0;
+    uint32_t _lastDebugView = 0;
+    bool _warnedSubNative = false;
+
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
                                  FFX_DENOISER_VERSION_PATCH };
 

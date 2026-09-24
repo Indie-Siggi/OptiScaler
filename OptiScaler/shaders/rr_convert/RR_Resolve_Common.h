@@ -20,6 +20,8 @@ struct alignas(256) RRResolveConstants
     float NearPlane;    // for normalizing the linear-depth debug view
     float FarPlane;
     uint32_t ReModulate; // 1 = re-modulate denoised radiance by fused albedo (pair with conversion DemodulateRadiance)
+    float RadianceScale;  // the conversion's radiance range scale; divided back out here (pair with RRConstants)
+    uint32_t UseExposure; // 1 = the scale also included the game's ExposureTexture (t7)
 };
 
 inline static std::string resolveShaderCode = R"(
@@ -31,6 +33,8 @@ cbuffer Params : register(b0)
     float NearPlane;
     float FarPlane;
     uint  ReModulate; // 1 = re-modulate the denoised radiance by fused albedo
+    float RadianceScale;
+    uint  UseExposure;
 };
 
 Texture2D<float4> InDenoised : register(t0); // MLD denoiser output (intermediate)
@@ -40,6 +44,7 @@ Texture2D<float>  InDepth    : register(t3); // linear depth
 Texture2D<float4> InMotion   : register(t4); // UV motion, B depth delta
 Texture2D<float4> InNormals  : register(t5); // RG octahedral, B roughness
 Texture2D<float4> InFused    : register(t6); // fused albedo guide
+Texture2D<float>  InExposure : register(t7); // 1x1 exposure (read iff UseExposure)
 
 RWTexture2D<float4> OutColor : register(u0); // app output target
 
@@ -51,6 +56,10 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 
     int3 p = int3(tid.xy, 0);
 
+    // Undo the conversion's radiance range scale (denoised and noisy radiance are both in scaled units).
+    float radianceScale = RadianceScale * ((UseExposure != 0u) ? InExposure.Load(int3(0, 0, 0)) : 1.0);
+    float invScale = 1.0 / max(radianceScale, 1e-8);
+
     if (DebugView == 0)
     {
         // Recomposition. MLD 1-signal denoises in DEMODULATED (lighting) space, so re-modulate the denoised
@@ -60,7 +69,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
         // skip colour is the original modulated colour, so it is composited after re-modulation).
         float4 d = InDenoised.Load(p);
         float4 s = InSkip.Load(p);
-        float3 lit = d.rgb;
+        float3 lit = d.rgb * invScale;
         if (ReModulate != 0)
         {
             float3 fusedLinear = InFused.Load(p).rgb; // stored sqrt(fused)
@@ -97,7 +106,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     }
     else if (DebugView == 6) // noisy radiance (conversion input to the denoiser)
     {
-        v = InRadiance.Load(p).rgb;
+        v = InRadiance.Load(p).rgb * invScale;
     }
     else if (DebugView == 7) // sky mask (skip-signal alpha)
     {
@@ -105,7 +114,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     }
     else // 8+ : denoised passthrough
     {
-        v = InDenoised.Load(p).rgb;
+        v = InDenoised.Load(p).rgb * invScale;
     }
 
     OutColor[tid.xy] = float4(v, 1.0);

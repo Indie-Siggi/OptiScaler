@@ -35,6 +35,10 @@ struct alignas(256) RRConstants
     float DepthMatD;
     uint32_t HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = fall back to the near/far closed form
     uint32_t HasPrevDepth;       // 1 = compute the motion-vector .z depth delta from InPrevLinearDepth (history)
+    // Range normalization of the demodulated radiance fed to the denoiser (the resolve divides it back out):
+    // radiance *= RadianceScale * (UseExposure ? InExposure[0,0] : 1).
+    float RadianceScale;
+    uint32_t UseExposure;        // 1 = also multiply by the game's NGX ExposureTexture (t8)
 };
 
 // OutDebug layout: 2 sample pixels x 4 float4 each (centre at base 0, sky at base 4):
@@ -71,6 +75,8 @@ cbuffer Params : register(b0)
     float DepthMatD;
     uint  HasDepthMatrix;     // 1 = use the matrix coefficients; 0 = near/far closed form
     uint  HasPrevDepth;       // 1 = compute MV .z depth delta from InPrevLinearDepth
+    float RadianceScale;      // radiance *= RadianceScale * (UseExposure ? InExposure[0,0] : 1)
+    uint  UseExposure;
 };
 
 Texture2D<float4> InColor           : register(t0);
@@ -81,6 +87,7 @@ Texture2D<float4> InDiffuseAlbedo   : register(t4);
 Texture2D<float4> InSpecularAlbedo  : register(t5);
 Texture2D<float4> InSpecHitDist     : register(t6); // R specular ray length (hit distance)
 Texture2D<float>  InPrevLinearDepth : register(t7); // R previous-frame abs linear depth (for the MV depth delta)
+Texture2D<float>  InExposure        : register(t8); // R 1x1 exposure (NGX ExposureTexture); read iff UseExposure
 
 RWTexture2D<float4> OutRadiance       : register(u0); // RGB noisy radiance, A specular ray length
 RWTexture2D<float4> OutFusedAlbedo    : register(u1); // RGB max(spec,diff)
@@ -194,6 +201,9 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float3 radiance = color;
     if (DemodulateRadiance != 0)
         radiance = radiance / max(fused, 1e-4);
+    // Range normalization (e.g. Crimson feeds pre-exposure HDR, ~265 after demod); undone in the resolve.
+    float radianceScale = RadianceScale * ((UseExposure != 0u) ? InExposure.Load(int3(0, 0, 0)) : 1.0);
+    radiance *= radianceScale;
     float specHitDist = (InputMask & 16u) ? InSpecHitDist.Load(p).r : 0.0;
     OutRadiance[tid.xy] = float4(radiance, specHitDist);
 

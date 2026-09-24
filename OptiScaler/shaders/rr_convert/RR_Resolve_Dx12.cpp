@@ -49,13 +49,13 @@ void RR_Resolve_Dx12::PrepareForDenoiser(ID3D12GraphicsCommandList* InCmdList)
 bool RR_Resolve_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRResolveConstants& InConstants,
                                ID3D12Resource* InSkipSignal, ID3D12Resource* InRadiance, ID3D12Resource* InLinearDepth,
                                ID3D12Resource* InMotionVectors, ID3D12Resource* InNormals, ID3D12Resource* InFusedAlbedo,
-                               ID3D12Resource* InOutput)
+                               ID3D12Resource* InExposure, ID3D12Resource* InOutput)
 {
     if (!_init || _device == nullptr || InCmdList == nullptr || !CanRender())
         return false;
 
     if (InSkipSignal == nullptr || InRadiance == nullptr || InLinearDepth == nullptr || InMotionVectors == nullptr ||
-        InNormals == nullptr || InFusedAlbedo == nullptr || InOutput == nullptr)
+        InNormals == nullptr || InFusedAlbedo == nullptr || InExposure == nullptr || InOutput == nullptr)
     {
         LOG_ERROR("[{0}] missing input resource", _name);
         return false;
@@ -73,7 +73,7 @@ bool RR_Resolve_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRRes
     _counter = (_counter + 1) % RR_RESOLVE_NUM_OF_HEAPS;
     FrameDescriptorHeap& heap = _frameHeaps[_counter];
 
-    // SRVs t0..t6
+    // SRVs t0..t7
     CreateShaderResourceView(_device, _denoised, heap.GetSrvCPU(0));
     CreateShaderResourceView(_device, InSkipSignal, heap.GetSrvCPU(1));
     CreateShaderResourceView(_device, InRadiance, heap.GetSrvCPU(2));
@@ -81,6 +81,7 @@ bool RR_Resolve_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRRes
     CreateShaderResourceView(_device, InMotionVectors, heap.GetSrvCPU(4));
     CreateShaderResourceView(_device, InNormals, heap.GetSrvCPU(5));
     CreateShaderResourceView(_device, InFusedAlbedo, heap.GetSrvCPU(6));
+    CreateShaderResourceView(_device, InExposure, heap.GetSrvCPU(7));
 
     // UAV u0 (app output target)
     CreateUnorderedAccessView(_device, InOutput, heap.GetUavCPU(0), 0);
@@ -117,8 +118,8 @@ RR_Resolve_Dx12::RR_Resolve_Dx12(std::string InName, ID3D12Device* InDevice) : S
 
     LOG_DEBUG("{0} start!", _name);
 
-    // 7 SRVs (denoised + 6 conversion outputs), 1 UAV (app output), 1 CBV.
-    if (!SetupRootSignature(InDevice, 7, 1, 1))
+    // 8 SRVs (denoised + 6 conversion outputs + exposure), 1 UAV (app output), 1 CBV.
+    if (!SetupRootSignature(InDevice, 8, 1, 1))
     {
         LOG_ERROR("Failed to setup root signature");
         return;

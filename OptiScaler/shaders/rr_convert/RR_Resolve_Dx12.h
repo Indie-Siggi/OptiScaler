@@ -44,7 +44,7 @@ class RR_Resolve_Dx12 : public Shader_Dx12
     bool Dispatch(ID3D12GraphicsCommandList* InCmdList, const RRResolveConstants& InConstants,
                   ID3D12Resource* InSkipSignal, ID3D12Resource* InRadiance, ID3D12Resource* InLinearDepth,
                   ID3D12Resource* InMotionVectors, ID3D12Resource* InNormals, ID3D12Resource* InFusedAlbedo,
-                  ID3D12Resource* InOutput);
+                  ID3D12Resource* InExposure, ID3D12Resource* InOutput);
 
     bool CanRender() const { return _init && _denoised != nullptr; }
 

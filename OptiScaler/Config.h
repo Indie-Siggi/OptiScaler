@@ -448,6 +448,10 @@ class Config
     CustomOptional<float> RrRadianceClipStdK { -1.0f };            // std-dev K for history clipping; leave default
     CustomOptional<float> RrGaussianKernelRelaxation { 0.0f };     // spatial blur kernel; 0 = sharpest (less blur)
     CustomOptional<float> RrDisocclusionThreshold { 0.02f };       // reprojection depth threshold (AMD 0.01..0.05)
+    // Range normalization of the demodulated radiance into the denoiser, undone after it (live, per frame):
+    // radiance *= RadianceScale * (UseExposureTexture ? game's NGX ExposureTexture : 1).
+    CustomOptional<float> RrRadianceScale { 1.0f };
+    CustomOptional<bool> RrUseExposureTexture { false };
 
     CustomOptional<bool> FsrNonLinearColorSpace { false };
     CustomOptional<bool> FsrNonLinearSRGB { false };

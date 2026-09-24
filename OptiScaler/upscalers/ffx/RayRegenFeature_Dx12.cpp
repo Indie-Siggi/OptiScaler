@@ -178,10 +178,18 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     _profile = ResolveRRProfile();
     LOG_INFO("RR profile: {0}", _profile.name);
 
+    // Size for the largest render the game can switch to without a recreate (DLAA = output size). This feature
+    // does not run SetInitParameters, so read the NGX creation output size directly.
+    unsigned int outWidth = 0, outHeight = 0;
+    InParameters->Get(NVSDK_NGX_Parameter_OutWidth, &outWidth);
+    InParameters->Get(NVSDK_NGX_Parameter_OutHeight, &outHeight);
+    _maxRenderWidth = (outWidth > _renderWidth) ? outWidth : _renderWidth;
+    _maxRenderHeight = (outHeight > _renderHeight) ? outHeight : _renderHeight;
+
     ffxCreateContextDescDenoiser denoiserDesc = { 0 };
     denoiserDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_DENOISER;
     denoiserDesc.version = FFX_DENOISER_VERSION;
-    denoiserDesc.maxRenderSize = { _renderWidth, _renderHeight };
+    denoiserDesc.maxRenderSize = { _maxRenderWidth, _maxRenderHeight };
     denoiserDesc.mode = _profile.denoiserMode; // 1-signal (only mode reachable from NGX-RR today)
     denoiserDesc.flags = 0;
 
@@ -203,8 +211,8 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
         }
     }
 
-    LOG_INFO("FFX-MLD Ray Regen context created ({0}x{1}, mode {2})", _renderWidth, _renderHeight,
-             _profile.denoiserMode);
+    LOG_INFO("FFX-MLD Ray Regen context created (max {0}x{1}, render {2}x{3}, mode {4})", _maxRenderWidth,
+             _maxRenderHeight, _renderWidth, _renderHeight, _profile.denoiserMode);
 
     // Apply the [RayRegen] denoiser tuning overrides ONCE here, at context creation, from the profile
     // snapshot resolved above. Applying them live per-frame via ffxConfigure wedged the gfx ring (a
@@ -251,10 +259,41 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     dispatchDesc.commandList = InCommandList;
 
     GetRenderResolution(InParameters, &_renderWidth, &_renderHeight);
+    if (_renderWidth > _maxRenderWidth || _renderHeight > _maxRenderHeight)
+    {
+        LOG_ERROR("RR: render {0}x{1} exceeds the context max {2}x{3}; skipping (restart the game)", _renderWidth,
+                  _renderHeight, _maxRenderWidth, _maxRenderHeight);
+        return false;
+    }
     dispatchDesc.renderSize = { _renderWidth, _renderHeight };
 
     // Motion vectors are expressed in UV space (PreviousUV - CurrentUV); B scales the depth delta.
     dispatchDesc.motionVectorScale = { 1.0f, 1.0f, 1.0f };
+
+    // NGX MV.Scale maps the game's MV texture to pixels, so MV.Scale / renderSize maps it to UV. Cyberpunk:
+    // (1920,1080) at 1920x1080 -> (1,1); Crimson Desert: (3840,-2160) at 3840x2160 -> (1,-1), i.e. UV MVs with
+    // Y flipped. The [RayRegen] MotionScaleX/Y stay as an extra multiplier on top (1 = trust NGX).
+    float ngxMvScaleX = 0.0f, ngxMvScaleY = 0.0f;
+    InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_X, &ngxMvScaleX);
+    InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &ngxMvScaleY);
+    float mvScaleX = _profile.motionScaleX;
+    float mvScaleY = _profile.motionScaleY;
+    if (ngxMvScaleX != 0.0f && ngxMvScaleY != 0.0f && _renderWidth > 0 && _renderHeight > 0)
+    {
+        mvScaleX *= ngxMvScaleX / (float) _renderWidth;
+        mvScaleY *= ngxMvScaleY / (float) _renderHeight;
+    }
+
+    // Live (per-frame) settings: debug view + radiance range scale are plain shader constants, so unlike the
+    // denoiser tuning they are safe to change mid-session from the overlay. Leaving a debug view (which skips
+    // the denoiser) restarts the denoiser history.
+    const uint32_t debugView = static_cast<uint32_t>(Config::Instance()->RrDebugView.value_or_default());
+    if (debugView == 0 && _lastDebugView != 0)
+        _resetHistory = true;
+    _lastDebugView = debugView;
+    float radianceScale = Config::Instance()->RrRadianceScale.value_or_default();
+    if (!(radianceScale > 0.0f))
+        radianceScale = 1.0f;
 
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &dispatchDesc.jitterOffsets.x);
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &dispatchDesc.jitterOffsets.y);
@@ -391,6 +430,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     ID3D12Resource* inDiffAlb = nullptr; InParameters->Get("DLSS.Input.DiffuseAlbedo", &inDiffAlb);
     ID3D12Resource* inSpecAlb = nullptr; InParameters->Get("DLSS.Input.SpecularAlbedo", &inSpecAlb);
     ID3D12Resource* inSpecHit = nullptr; InParameters->Get("DLSSD.SpecularHitDistance", &inSpecHit);
+    ID3D12Resource* inExposure = nullptr; InParameters->Get(NVSDK_NGX_Parameter_ExposureTexture, &inExposure);
+    const bool useExposure = Config::Instance()->RrUseExposureTexture.value_or_default() && inExposure != nullptr;
 
     // Only colour/depth/output are mandatory. Missing optional GBuffer inputs degrade gracefully (Step 1):
     // their SRV is bound to a valid stand-in (colour) and the shader ignores it via InputMask, so an
@@ -417,9 +458,20 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     if (inDiffAlb == nullptr) inDiffAlb = inColor;
     if (inSpecAlb == nullptr) inSpecAlb = inColor;
     if (inSpecHit == nullptr) inSpecHit = inColor;
+    if (inExposure == nullptr) inExposure = inColor;
 
-    // Lazily allocate the conversion output textures (render-res; heap props copied from color).
-    if (!_convert->CanRender() && !_convert->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
+    // The bridge denoises without upscaling, so a sub-native render only covers part of the output.
+    if (!_warnedSubNative && (_renderWidth < _maxRenderWidth || _renderHeight < _maxRenderHeight))
+    {
+        LOG_WARN("RR: render {0}x{1} is below the output {2}x{3}; the bridge is DLAA-only, select DLAA/native",
+                 _renderWidth, _renderHeight, _maxRenderWidth, _maxRenderHeight);
+        _warnedSubNative = true;
+    }
+
+    // Lazily allocate the conversion output textures at the context max size (heap props copied from color),
+    // so a later render-size change within that bound needs no reallocation. Shaders bound by RenderWidth/Height.
+    if (!_convert->CanRender() &&
+        !_convert->CreateBufferResources(Device, inColor, _maxRenderWidth, _maxRenderHeight))
     {
         LOG_ERROR("Failed to allocate conversion output buffers");
         return false;
@@ -427,7 +479,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
 
     // Lazily allocate the resolve pass's denoised intermediate (the MLD denoiser writes here, then the
     // resolve pass recomposes the sky / debug-visualizes into the app output).
-    if (!_resolve->CanRender() && !_resolve->CreateBufferResources(Device, inColor, _renderWidth, _renderHeight))
+    if (!_resolve->CanRender() && !_resolve->CreateBufferResources(Device, inColor, _maxRenderWidth, _maxRenderHeight))
     {
         LOG_ERROR("Failed to allocate the resolve intermediate buffer");
         return false;
@@ -437,8 +489,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     RRConstants rrc {};
     rrc.RenderWidth = _renderWidth;
     rrc.RenderHeight = _renderHeight;
-    rrc.MotionScaleX = _profile.motionScaleX;
-    rrc.MotionScaleY = _profile.motionScaleY;
+    rrc.MotionScaleX = mvScaleX;
+    rrc.MotionScaleY = mvScaleY;
     rrc.NearPlane = camNear;
     rrc.FarPlane = camFar;
     rrc.ReversedZ = _profile.reversedZ ? 1u : 0u;
@@ -456,11 +508,13 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // reset/camera-cut frame: the previous linear-depth buffer is stale across the cut, so a delta from it
     // would mis-validate temporal reprojection for that frame.
     rrc.HasPrevDepth = (_profile.reprojection && _frameCount > 0 && !isReset) ? 1u : 0u;
+    rrc.RadianceScale = radianceScale;
+    rrc.UseExposure = useExposure ? 1u : 0u;
 
     {
         ScopedGpuMarker marker(InCommandList, "RR Convert (NGX-RR -> MLD inputs)");
         if (!_convert->Dispatch(InCommandList, rrc, inColor, inDepth, inMv, inNormals, inDiffAlb, inSpecAlb,
-                                inSpecHit))
+                                inSpecHit, inExposure))
         {
             LOG_ERROR("NGX-RR -> MLD conversion dispatch failed");
             return false;
@@ -480,12 +534,10 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     dispatchDesc.specularAlbedo = ffxApiGetResourceDX12(_convert->SpecularAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
     dispatchDesc.diffuseAlbedo = ffxApiGetResourceDX12(_convert->DiffuseAlbedo(), FFX_API_RESOURCE_STATE_COMPUTE_READ);
 
-    // Debug visualization (DebugView != 0) routes a converted signal straight to the output and skips
-    // the denoiser, so we can ground-truth the conversion in-game. Normal path runs the denoiser into the
-    // resolve pass's intermediate, then recomposes the sky from the skip-signal.
-    const uint32_t debugView = _profile.debugView;
-
-    if (debugView == 0)
+    // Debug visualization (DebugView 1..7) routes a converted signal straight to the output and skips the
+    // denoiser, so we can ground-truth the conversion in-game. Normal path (0) and the denoised view (8) run the
+    // denoiser into the resolve pass's intermediate; 0 then recomposes the sky from the skip-signal.
+    if (debugView == 0 || debugView >= 8)
     {
         // 1-signal radiance: noisy radiance in (from converter) -> denoised out (resolve intermediate).
         _resolve->PrepareForDenoiser(InCommandList);
@@ -520,12 +572,14 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // Re-modulate the denoised radiance by fused albedo iff the conversion demodulated it (MLD 1-signal
     // denoises in lighting space; the two must stay paired). See RR_Resolve_Common.h + A3.6.
     rrr.ReModulate = _profile.demodulateRadiance ? 1u : 0u;
+    rrr.RadianceScale = radianceScale;
+    rrr.UseExposure = useExposure ? 1u : 0u;
 
     {
         ScopedGpuMarker marker(InCommandList, "RR Resolve (recompose/debug)");
         if (!_resolve->Dispatch(InCommandList, rrr, _convert->SkipSignal(), _convert->Radiance(),
                                 _convert->LinearDepth(), _convert->MotionVectors(), _convert->Normals(),
-                                _convert->FusedAlbedo(), inOutput))
+                                _convert->FusedAlbedo(), inExposure, inOutput))
         {
             LOG_ERROR("RR resolve dispatch failed");
             return false;
@@ -548,6 +602,26 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
                  "camPos=({7:.2f},{8:.2f},{9:.2f}) posDelta=({10:.4f},{11:.4f},{12:.4f})",
                  reprojValid, camRight[0], camRight[1], camRight[2], camFwd[0], camFwd[1], camFwd[2], camPos[0],
                  camPos[1], camPos[2], posDelta[0], posDelta[1], posDelta[2]);
+        LOG_INFO("RR-debug scale: max={0}x{1} ngxMvScale=({2:.1f},{3:.1f}) mvScale=({4:.5f},{5:.5f}) "
+                 "radianceScale={6:.5f} useExposure={7} exposureTex={8}",
+                 _maxRenderWidth, _maxRenderHeight, ngxMvScaleX, ngxMvScaleY, mvScaleX, mvScaleY, radianceScale,
+                 useExposure, (void*) (inExposure != inColor ? inExposure : nullptr));
+
+        // Raw camera matrices (as the game passes them), to pin down its convention.
+        auto logMatrix = [&](const char* key)
+        {
+            void* ptr = nullptr;
+            if (InParameters->Get(key, &ptr) != NVSDK_NGX_Result_Success || ptr == nullptr)
+                return;
+            const float* m = reinterpret_cast<const float*>(ptr);
+            LOG_INFO("RR-debug {0}: [{1:.4f} {2:.4f} {3:.4f} {4:.4f}] [{5:.4f} {6:.4f} {7:.4f} {8:.4f}] "
+                     "[{9:.4f} {10:.4f} {11:.4f} {12:.4f}] [{13:.4f} {14:.4f} {15:.4f} {16:.4f}]",
+                     key, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
+                     m[14], m[15]);
+        };
+        logMatrix("WorldToViewMatrix");
+        logMatrix("ViewToClipMatrix");
+
         _convert->LogDebugSamples();
     }
 
