@@ -48,7 +48,8 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
     // pipeline is denoiser -> FSR upscaler too, also at 1:1 ("Native AA").
     ffxContext _upscaleContext = nullptr;
     unsigned int _ngxCreateFlags = 0;
-    bool CreateUpscalerContext();
+    bool _upscaleTried = false; // created lazily on the first frame, once we know whether the game sets an exposure
+    bool CreateUpscalerContext(bool InHasExposure);
 
     feature_version _version = { FFX_DENOISER_VERSION_MAJOR, FFX_DENOISER_VERSION_MINOR,
                                  FFX_DENOISER_VERSION_PATCH };

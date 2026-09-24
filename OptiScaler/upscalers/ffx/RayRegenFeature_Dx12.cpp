@@ -111,7 +111,7 @@ void RayRegenFeatureDx12::ReleaseDenoiserContext()
     }
 }
 
-bool RayRegenFeatureDx12::CreateUpscalerContext()
+bool RayRegenFeatureDx12::CreateUpscalerContext(bool InHasExposure)
 {
     if (!FfxApiProxy::IsSRReady())
     {
@@ -134,7 +134,9 @@ bool RayRegenFeatureDx12::CreateUpscalerContext()
         upscaleDesc.flags |= FFX_UPSCALE_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION;
     if (!(_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes))
         upscaleDesc.flags |= FFX_UPSCALE_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS;
-    if (_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_AutoExposure)
+    // Auto-exposure when the game asks for it OR sets no ExposureTexture (Cyberpunk: flags 0xb without the bit, but
+    // no texture; FSR dispatched without either crashed on the first frame). Same guard as FFXFeature_Dx12.
+    if ((_ngxCreateFlags & NVSDK_NGX_DLSS_Feature_Flags_AutoExposure) || !InHasExposure)
         upscaleDesc.flags |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
 
     ffxCreateBackendDX12Desc backendDesc = { 0 };
@@ -276,9 +278,6 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
     // reconfigure between dispatches stalls the queue), so tuning changes take effect only on an RR
     // restart: the menu's "Apply" button recreates the feature, which re-enters this path.
     ApplyDenoiserTuning();
-
-    if (Config::Instance()->RrFsrAntiAliasing.value_or_default())
-        CreateUpscalerContext();
 
     _convert = std::make_unique<RR_Dx12>("RayRegenConvert", Device);
     if (_convert == nullptr || !_convert->IsInit())
@@ -608,7 +607,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     if (inExposure == nullptr) inExposure = inColor;
 
     // The bridge denoises without upscaling, so a sub-native render only covers part of the output.
-    if (!_warnedSubNative && _upscaleContext == nullptr &&
+    if (!_warnedSubNative && !Config::Instance()->RrFsrAntiAliasing.value_or_default() &&
         (_renderWidth < _maxRenderWidth || _renderHeight < _maxRenderHeight))
     {
         LOG_WARN("RR: render {0}x{1} is below the output {2}x{3} and FSR is off; select DLAA/native or FsrAntiAliasing",
@@ -725,6 +724,13 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     rrr.RadianceScale = radianceScale;
     rrr.UseExposure = useExposure ? 1u : 0u;
 
+    // The FSR context is created on the first frame: whether the game sets an ExposureTexture decides auto-exposure.
+    if (!_upscaleTried && Config::Instance()->RrFsrAntiAliasing.value_or_default())
+    {
+        _upscaleTried = true;
+        CreateUpscalerContext(gameExposure != nullptr);
+    }
+
     // Normal view: denoised + re-modulated -> FSR anti-aliasing -> app output (AMD's denoiser -> upscaler order).
     // Debug views and the no-FSR fallback write the app output directly.
     const bool useFsr = (debugView == 0 && _upscaleContext != nullptr && gameMv != nullptr);
@@ -748,7 +754,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
         _resolve->TransitionComposited(InCommandList, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
         ScopedGpuMarker marker(InCommandList, "RR FSR anti-aliasing");
-        if (!DispatchUpscaler(InCommandList, InParameters, inDepth, gameMv, useExposure ? gameExposure : nullptr,
+        if (!DispatchUpscaler(InCommandList, InParameters, inDepth, gameMv, gameExposure,
                               inOutput, isReset, camNear, camFar, camFov, frameTimeMs))
             return false;
     }
