@@ -95,6 +95,7 @@ ID3D12Resource* GetResource(NVSDK_NGX_Parameter* params, const char* key)
 PrismFeatureDx12::PrismFeatureDx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters)
     : IFeature(InHandleId, InParameters), IFeature_Dx12(InHandleId, InParameters), _impl(std::make_unique<Impl>())
 {
+    _initParameters = SetInitParameters(InParameters); // the create flags and the render / output sizes
     _moduleLoaded = Config::Instance()->PrismModelPath.has_value();
 
     if (!_moduleLoaded)
