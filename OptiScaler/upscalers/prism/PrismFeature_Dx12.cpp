@@ -214,6 +214,7 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     prism::NssFrameParams params;
     params.exposure = cfg.PrismExposure.value_or_default();
+    params.history_clamp = cfg.PrismHistoryClamp.value_or_default();
 
     float jitter[2] = {};
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &jitter[0]);

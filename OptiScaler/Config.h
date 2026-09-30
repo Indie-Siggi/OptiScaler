@@ -496,6 +496,7 @@ class Config
     CustomOptional<float> PrismJitterScaleY { 1.0f };
     CustomOptional<float> PrismMotionScaleX { 1.0f };       // multiplies the game's motion vectors (-1 flips)
     CustomOptional<float> PrismMotionScaleY { 1.0f };
+    CustomOptional<float> PrismHistoryClamp { 1.0f };      // scales NSS's history clamp window (lower: less ghosting)
     CustomOptional<bool> FsrUseFsrInputValues { true };
 
     // dx11wdx12

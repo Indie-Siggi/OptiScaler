@@ -2684,6 +2684,12 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
                 config->PrismExposure = exposure;
             ShowHelpMarker("Multiplies the color before NSS's internal tone mapping");
 
+            float historyClamp = config->PrismHistoryClamp.value_or_default();
+            if (ImGui::SliderFloat("History Clamp", &historyClamp, 0.05f, 2.0f, "%.2f"))
+                config->PrismHistoryClamp = historyClamp;
+            ShowHelpMarker("Scales NSS's history clamp window: lower removes ghosting on thin moving detail\n"
+                           "sooner but shimmers more; 1.0 = NSS as trained");
+
             bool flipX = config->PrismJitterScaleX.value_or_default() < 0.0f;
             if (ImGui::Checkbox("Flip Jitter X", &flipX))
                 config->PrismJitterScaleX = flipX ? -1.0f : 1.0f;
