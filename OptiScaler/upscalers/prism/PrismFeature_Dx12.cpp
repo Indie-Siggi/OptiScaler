@@ -218,8 +218,10 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     float jitter[2] = {};
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &jitter[0]);
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &jitter[1]);
-    params.jitter[0] = jitter[1] * cfg.PrismJitterScaleY.value_or_default(); // NSS: (row, column)
-    params.jitter[1] = jitter[0] * cfg.PrismJitterScaleX.value_or_default();
+    // NSS wants where the sample sat relative to the pixel center, (row, column); NGX's jitter is the opposite
+    // (Cyberpunk 2077: both axes flipped was sharp and stable, either unflipped blurred and shimmered).
+    params.jitter[0] = -jitter[1] * cfg.PrismJitterScaleY.value_or_default();
+    params.jitter[1] = -jitter[0] * cfg.PrismJitterScaleX.value_or_default();
     params.render_size[0] = (float) height;
     params.render_size[1] = (float) width;
 
