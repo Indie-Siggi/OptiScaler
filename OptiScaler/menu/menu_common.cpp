@@ -2672,6 +2672,43 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
             }
         }
 
+        // Prism -----------------
+        if (!usesDlssd && currentBackend == Upscaler::Prism)
+        {
+            SeparatorWithHelpMarker("Prism NSS Settings", "Read every frame: changes apply live");
+            ImGui::PushItemWidth(135.0f * menuResScale);
+
+            float exposure = config->PrismExposure.value_or_default();
+            if (ImGui::SliderFloat("Exposure", &exposure, 0.125f, 16.0f, "%.3f", ImGuiSliderFlags_Logarithmic))
+                config->PrismExposure = exposure;
+            ShowHelpMarker("Multiplies the color before NSS's internal tone mapping");
+
+            bool flipX = config->PrismJitterScaleX.value_or_default() < 0.0f;
+            if (ImGui::Checkbox("Flip Jitter X", &flipX))
+                config->PrismJitterScaleX = flipX ? -1.0f : 1.0f;
+            ImGui::SameLine(0.0f, 6.0f);
+            bool flipY = config->PrismJitterScaleY.value_or_default() < 0.0f;
+            if (ImGui::Checkbox("Flip Jitter Y", &flipY))
+                config->PrismJitterScaleY = flipY ? -1.0f : 1.0f;
+            ShowHelpMarker("The game's jitter sign convention; a wrong sign blurs and shimmers");
+
+            // The depth -> view-depth conversion uses the FSR camera values
+            float cameraNear = config->FsrCameraNear.value_or_default();
+            if (ImGui::SliderFloat("Camera Near", &cameraNear, 0.001f, 100.0f, "%.3f", ImGuiSliderFlags_Logarithmic))
+                config->FsrCameraNear = cameraNear;
+            float cameraFar = config->FsrCameraFar.value_or_default();
+            if (ImGui::SliderFloat("Camera Far", &cameraFar, 10.0f, 1000000.0f, "%.0f", ImGuiSliderFlags_Logarithmic))
+                config->FsrCameraFar = cameraFar;
+            float vfov = config->FsrVerticalFov.value_or_default();
+            if (ImGui::SliderFloat("Vert. FOV", &vfov, 20.0f, 120.0f, "%.1f"))
+                config->FsrVerticalFov = vfov;
+            ShowHelpMarker("Camera values for NSS's disocclusion test (history rejection)");
+
+            ImGui::PopItemWidth();
+            ImGui::Spacing();
+            ImGui::Spacing();
+        }
+
         // FFX -----------------
         if (!usesDlssd && (currentBackend == Upscaler::FFX || currentBackend == Upscaler::FFX_on12))
         {
