@@ -2690,6 +2690,18 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
             ShowHelpMarker("Scales NSS's history clamp window: lower removes ghosting on thin moving detail\n"
                            "sooner but shimmers more; 1.0 = NSS as trained");
 
+            const char* debugViews[] = { "Off", "Theta", "Alpha", "Gamma", "Motion" };
+            int debugView = config->PrismDebugView.value_or_default();
+            if (ImGui::Combo("Debug View", &debugView, debugViews, IM_ARRAYSIZE(debugViews)))
+                config->PrismDebugView = debugView;
+            ShowHelpMarker("Gray output: theta = unclamped history kept, alpha = current frame blended in,\n"
+                           "gamma = history clamp window, motion = motion length (16 px = white). Not saved");
+
+            bool disableHistory = config->PrismDisableHistory.value_or_default();
+            if (ImGui::Checkbox("Disable History", &disableHistory))
+                config->PrismDisableHistory = disableHistory;
+            ShowHelpMarker("Every frame starts a new sequence: only the current frame is used. Not saved");
+
             bool flipX = config->PrismJitterScaleX.value_or_default() < 0.0f;
             if (ImGui::Checkbox("Flip Jitter X", &flipX))
                 config->PrismJitterScaleX = flipX ? -1.0f : 1.0f;
