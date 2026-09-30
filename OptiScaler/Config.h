@@ -497,6 +497,7 @@ class Config
     CustomOptional<float> PrismMotionScaleX { 1.0f };       // multiplies the game's motion vectors (-1 flips)
     CustomOptional<float> PrismMotionScaleY { 1.0f };
     CustomOptional<float> PrismHistoryClamp { 1.0f };      // scales NSS's history clamp window (lower: less ghosting)
+    CustomOptional<float> PrismAntiGhost { 0.0f };         // rejects stale history outside the clamp window
     CustomOptional<int32_t> PrismDebugView { 0 };          // overlay only, not saved: NssFrameParams::debug_view
     CustomOptional<bool> PrismDisableHistory { false };    // overlay only, not saved: every frame starts a sequence
     CustomOptional<bool> FsrUseFsrInputValues { true };

@@ -2690,6 +2690,12 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
             ShowHelpMarker("Scales NSS's history clamp window: lower removes ghosting on thin moving detail\n"
                            "sooner but shimmers more; 1.0 = NSS as trained");
 
+            float antiGhost = config->PrismAntiGhost.value_or_default();
+            if (ImGui::SliderFloat("Anti-Ghost", &antiGhost, 0.0f, 16.0f, "%.2f"))
+                config->PrismAntiGhost = antiGhost;
+            ShowHelpMarker("Rejects history that no longer matches the current frame (e.g. wind-blown foliage);\n"
+                           "higher = stronger, 0 = NSS as trained");
+
             const char* debugViews[] = { "Off", "Theta", "Alpha", "Gamma", "Motion" };
             int debugView = config->PrismDebugView.value_or_default();
             if (ImGui::Combo("Debug View", &debugView, debugViews, IM_ARRAYSIZE(debugViews)))

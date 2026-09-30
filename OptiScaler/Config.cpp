@@ -282,6 +282,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             PrismMotionScaleX.set_from_config(readFloat("Prism", "MotionScaleX"));
             PrismMotionScaleY.set_from_config(readFloat("Prism", "MotionScaleY"));
             PrismHistoryClamp.set_from_config(readFloat("Prism", "HistoryClamp"));
+            PrismAntiGhost.set_from_config(readFloat("Prism", "AntiGhost"));
         }
 
         // FSR
@@ -1151,6 +1152,7 @@ bool Config::SaveIni()
         ini.SetValue("Prism", "MotionScaleX", GetFloatValue(Instance()->PrismMotionScaleX.value_for_config()).c_str());
         ini.SetValue("Prism", "MotionScaleY", GetFloatValue(Instance()->PrismMotionScaleY.value_for_config()).c_str());
         ini.SetValue("Prism", "HistoryClamp", GetFloatValue(Instance()->PrismHistoryClamp.value_for_config()).c_str());
+        ini.SetValue("Prism", "AntiGhost", GetFloatValue(Instance()->PrismAntiGhost.value_for_config()).c_str());
     }
 
     // FSR
