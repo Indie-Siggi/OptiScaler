@@ -295,6 +295,8 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         return false;
     }
 
+    _frameCount++; // OptiScaler treats a feature whose frame count stops as unused by the game
+
     return true;
 }
 
