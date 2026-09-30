@@ -238,16 +238,11 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         InParameters->Get(OptiKeys::FSR_CameraFovVertical, &verticalFov);
     }
 
-    if (DepthInverted())
-    {
-        params.depth_params[0] = -cameraNear / (cameraFar - cameraNear);
-        params.depth_params[1] = cameraNear * cameraFar / (cameraFar - cameraNear);
-    }
-    else
-    {
-        params.depth_params[0] = cameraFar / (cameraFar - cameraNear);
-        params.depth_params[1] = -cameraNear * cameraFar / (cameraFar - cameraNear);
-    }
+    // NSS assumes standard depth (smaller is nearer): reversed-Z depth is imported as 1 - depth, so the params
+    // always describe standard depth.
+    frame.depth_inverted = DepthInverted();
+    params.depth_params[0] = cameraFar / (cameraFar - cameraNear);
+    params.depth_params[1] = -cameraNear * cameraFar / (cameraFar - cameraNear);
 
     const float tanHalfVertical = std::tan(verticalFov * 0.5f);
     params.depth_params[2] = tanHalfVertical * (float) width / (float) height;
