@@ -65,6 +65,8 @@ enum class Upscaler
     DLSS, // "dlss", used for the DLSS upscaler backend
 
     DLSSD, // "dlssd", used for the DLSS-D/Ray Reconstruction upscaler+denoiser backend
+
+    Prism, // "prism", Arm NSS through the Prism runtime (DX12 on vkd3d-proton; built only with PrismDir)
     Reset
 };
 

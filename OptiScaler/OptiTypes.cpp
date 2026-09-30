@@ -55,6 +55,9 @@ std::string UpscalerDisplayName(Upscaler upscaler, API api)
         else
             return "FSR 3.X";
 
+    case Upscaler::Prism:
+        return "Prism NSS";
+
     case Upscaler::FSR21_on12:
         return "FSR 2.1.2 w/Dx12";
 
@@ -148,6 +151,8 @@ std::string UpscalerToCode(Upscaler upscaler)
         return "dlssd";
     case Upscaler::FSR31: // DX11 only
         return "fsr31";
+    case Upscaler::Prism:
+        return "prism";
     default: // Upscaler::Reset and unknown
         return "";
     }
@@ -163,6 +168,7 @@ Upscaler CodeToUpscaler(const std::string& code)
         { "ffx", Upscaler::FFX },     { "ffx_12", Upscaler::FFX_on12 },
         { "dlss", Upscaler::DLSS },   { "dlssd", Upscaler::DLSSD },
         { "fsr31", Upscaler::FSR31 }, { "fsr31_12", Upscaler::FFX_on12 }, // for compat reasons
+        { "prism", Upscaler::Prism },
     };
 
     auto it = mapping.find(code);

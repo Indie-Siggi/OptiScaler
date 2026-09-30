@@ -273,6 +273,14 @@ bool Config::Reload(std::filesystem::path iniPath)
             FsrUseFsrInputValues.set_from_config(readBool("FSR", "UseFsrInputValues"));
         }
 
+        // Prism
+        {
+            PrismModelPath.set_from_config(readWString("Prism", "ModelPath"));
+            PrismExposure.set_from_config(readFloat("Prism", "Exposure"));
+            PrismJitterScaleX.set_from_config(readFloat("Prism", "JitterScaleX"));
+            PrismJitterScaleY.set_from_config(readFloat("Prism", "JitterScaleY"));
+        }
+
         // FSR
         {
             FsrVelocity.set_from_config(readFloat("FSR", "VelocityFactor"));
@@ -1128,6 +1136,15 @@ bool Config::SaveIni()
         ini.SetValue("FSR", "CameraFar", GetFloatValue(Instance()->FsrCameraFar.value_for_config()).c_str());
         ini.SetValue("FSR", "UseFsrInputValues",
                      GetBoolValue(Instance()->FsrUseFsrInputValues.value_for_config()).c_str());
+    }
+
+    // Prism
+    {
+        ini.SetValue("Prism", "ModelPath",
+                     wstring_to_string(Instance()->PrismModelPath.value_for_config_or(L"auto")).c_str());
+        ini.SetValue("Prism", "Exposure", GetFloatValue(Instance()->PrismExposure.value_for_config()).c_str());
+        ini.SetValue("Prism", "JitterScaleX", GetFloatValue(Instance()->PrismJitterScaleX.value_for_config()).c_str());
+        ini.SetValue("Prism", "JitterScaleY", GetFloatValue(Instance()->PrismJitterScaleY.value_for_config()).c_str());
     }
 
     // FSR

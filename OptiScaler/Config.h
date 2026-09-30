@@ -488,6 +488,12 @@ class Config
     CustomOptional<float> FsrHorizontalFov { 0.0f }; // off by default
     CustomOptional<float> FsrCameraNear { 0.1f };
     CustomOptional<float> FsrCameraFar { 100000.0f };
+
+    // Prism (Arm NSS)
+    CustomOptional<std::wstring, NoDefault> PrismModelPath; // an exported NSS model directory (local weights)
+    CustomOptional<float> PrismExposure { 1.0f };           // multiplies the color before NSS's tone mapping
+    CustomOptional<float> PrismJitterScaleX { 1.0f };       // the game's jitter (pixels) to NSS's sample offset
+    CustomOptional<float> PrismJitterScaleY { 1.0f };
     CustomOptional<bool> FsrUseFsrInputValues { true };
 
     // dx11wdx12

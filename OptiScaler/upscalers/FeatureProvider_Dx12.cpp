@@ -12,6 +12,7 @@
 #include "upscalers/fsr2_212/FSR2Feature_Dx12_212.h"
 #include "upscalers/ffx/FFXFeature_Dx12.h"
 #include "upscalers/xess/XeSSFeature_Dx12.h"
+#include "upscalers/prism/PrismFeature_Dx12.h"
 #include "FeatureProvider_Dx11.h"
 #include <misc/IdentifyGpu.h>
 
@@ -39,6 +40,10 @@ bool FeatureProvider_Dx12::GetFeature(Upscaler upscaler, UINT handleId, NVSDK_NG
 
     case Upscaler::FFX:
         *feature = std::make_unique<FFXFeatureDx12>(handleId, parameters);
+        break;
+
+    case Upscaler::Prism:
+        *feature = std::make_unique<PrismFeatureDx12>(handleId, parameters);
         break;
 
     case Upscaler::DLSS:
