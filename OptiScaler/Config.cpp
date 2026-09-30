@@ -279,6 +279,8 @@ bool Config::Reload(std::filesystem::path iniPath)
             PrismExposure.set_from_config(readFloat("Prism", "Exposure"));
             PrismJitterScaleX.set_from_config(readFloat("Prism", "JitterScaleX"));
             PrismJitterScaleY.set_from_config(readFloat("Prism", "JitterScaleY"));
+            PrismMotionScaleX.set_from_config(readFloat("Prism", "MotionScaleX"));
+            PrismMotionScaleY.set_from_config(readFloat("Prism", "MotionScaleY"));
         }
 
         // FSR
@@ -1145,6 +1147,8 @@ bool Config::SaveIni()
         ini.SetValue("Prism", "Exposure", GetFloatValue(Instance()->PrismExposure.value_for_config()).c_str());
         ini.SetValue("Prism", "JitterScaleX", GetFloatValue(Instance()->PrismJitterScaleX.value_for_config()).c_str());
         ini.SetValue("Prism", "JitterScaleY", GetFloatValue(Instance()->PrismJitterScaleY.value_for_config()).c_str());
+        ini.SetValue("Prism", "MotionScaleX", GetFloatValue(Instance()->PrismMotionScaleX.value_for_config()).c_str());
+        ini.SetValue("Prism", "MotionScaleY", GetFloatValue(Instance()->PrismMotionScaleY.value_for_config()).c_str());
     }
 
     // FSR

@@ -494,6 +494,8 @@ class Config
     CustomOptional<float> PrismExposure { 1.0f };           // multiplies the color before NSS's tone mapping
     CustomOptional<float> PrismJitterScaleX { 1.0f };       // the game's jitter (pixels) to NSS's sample offset
     CustomOptional<float> PrismJitterScaleY { 1.0f };
+    CustomOptional<float> PrismMotionScaleX { 1.0f };       // multiplies the game's motion vectors (-1 flips)
+    CustomOptional<float> PrismMotionScaleY { 1.0f };
     CustomOptional<bool> FsrUseFsrInputValues { true };
 
     // dx11wdx12

@@ -209,8 +209,8 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     float mvScale[2] = { 1.0f, 1.0f };
     InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_X, &mvScale[0]);
     InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &mvScale[1]);
-    frame.motion_scale[0] = -mvScale[0];
-    frame.motion_scale[1] = -mvScale[1];
+    frame.motion_scale[0] = -mvScale[0] * cfg.PrismMotionScaleX.value_or_default();
+    frame.motion_scale[1] = -mvScale[1] * cfg.PrismMotionScaleY.value_or_default();
 
     prism::NssFrameParams params;
     params.exposure = cfg.PrismExposure.value_or_default();
@@ -262,7 +262,8 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
             outHeight != _impl->outHeight)
         {
             // A new size restarts the sequence. The old upscaler's frames may still run: keep it a while.
-            LOG_INFO("Prism: NSS {}x{} -> {}x{}", width, height, outWidth, outHeight);
+            LOG_INFO("Prism: NSS {}x{} -> {}x{}, MV scale {} {}, jitter {} {}, depth inverted {}", width, height,
+                     outWidth, outHeight, mvScale[0], mvScale[1], jitter[0], jitter[1], DepthInverted());
             if (_impl->upscaler)
                 _impl->retired.push_back(std::move(_impl->upscaler));
             _impl->evaluationsSinceRetire = 0;

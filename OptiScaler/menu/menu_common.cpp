@@ -2692,6 +2692,15 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
                 config->PrismJitterScaleY = flipY ? -1.0f : 1.0f;
             ShowHelpMarker("The game's jitter sign convention; a wrong sign blurs and shimmers");
 
+            bool flipMotionX = config->PrismMotionScaleX.value_or_default() < 0.0f;
+            if (ImGui::Checkbox("Flip Motion X", &flipMotionX))
+                config->PrismMotionScaleX = flipMotionX ? -1.0f : 1.0f;
+            ImGui::SameLine(0.0f, 6.0f);
+            bool flipMotionY = config->PrismMotionScaleY.value_or_default() < 0.0f;
+            if (ImGui::Checkbox("Flip Motion Y", &flipMotionY))
+                config->PrismMotionScaleY = flipMotionY ? -1.0f : 1.0f;
+            ShowHelpMarker("The game's motion vector sign convention; a wrong sign ghosts in motion");
+
             // The depth -> view-depth conversion uses the FSR camera values
             float cameraNear = config->FsrCameraNear.value_or_default();
             if (ImGui::SliderFloat("Camera Near", &cameraNear, 0.001f, 100.0f, "%.3f", ImGuiSliderFlags_Logarithmic))
