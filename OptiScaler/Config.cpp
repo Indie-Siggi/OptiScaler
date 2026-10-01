@@ -286,6 +286,8 @@ bool Config::Reload(std::filesystem::path iniPath)
             PrismDisocclusionGate.set_from_config(readFloat("Prism", "DisocclusionGate"));
             PrismDisocclusionTolerance.set_from_config(readFloat("Prism", "DisocclusionTolerance"));
             PrismDisocclusionMotion.set_from_config(readFloat("Prism", "DisocclusionMotion"));
+            PrismCaptureDir.set_from_config(readWString("Prism", "CaptureDir"));
+            PrismCaptureFrames.set_from_config(readInt("Prism", "CaptureFrames"));
         }
 
         // FSR
@@ -1162,6 +1164,9 @@ bool Config::SaveIni()
                      GetFloatValue(Instance()->PrismDisocclusionTolerance.value_for_config()).c_str());
         ini.SetValue("Prism", "DisocclusionMotion",
                      GetFloatValue(Instance()->PrismDisocclusionMotion.value_for_config()).c_str());
+        ini.SetValue("Prism", "CaptureDir",
+                     wstring_to_string(Instance()->PrismCaptureDir.value_for_config_or(L"auto")).c_str());
+        ini.SetValue("Prism", "CaptureFrames", GetIntValue(Instance()->PrismCaptureFrames.value_for_config()).c_str());
     }
 
     // FSR

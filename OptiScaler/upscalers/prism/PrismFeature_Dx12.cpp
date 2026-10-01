@@ -1,5 +1,6 @@
 #include <pch.h>
 #include <Config.h>
+#include <Util.h>
 
 #include "PrismFeature_Dx12.h"
 
@@ -15,6 +16,8 @@
 #include <wrl/client.h>
 
 #include <cmath>
+#include <ctime>
+#include <cwchar>
 #include <deque>
 #include <filesystem>
 
@@ -50,6 +53,7 @@ struct PrismFeatureDx12::Impl
     unsigned int width = 0, height = 0, outWidth = 0, outHeight = 0;
     unsigned int evaluationsSinceRetire = 0;
     bool exposureWarned = false;
+    std::string lastCaptureError; // logged once
 };
 
 namespace
@@ -279,6 +283,26 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
             reset = 1;
         }
 
+        if (cfg.PrismCaptureNow.value_or_default())
+        {
+            cfg.PrismCaptureNow = false;
+            std::filesystem::path base = cfg.PrismCaptureDir.has_value()
+                                             ? std::filesystem::path(cfg.PrismCaptureDir.value())
+                                             : Util::DllPath().parent_path() / "prism-capture";
+            std::time_t now = std::time(nullptr);
+            std::tm local {};
+            localtime_s(&local, &now);
+            wchar_t stamp[32];
+            std::wcsftime(stamp, 32, L"%Y%m%d-%H%M%S", &local);
+            std::filesystem::path dir = base / stamp;
+            int frames = std::clamp(cfg.PrismCaptureFrames.value_or_default(), 1, 600);
+            _impl->upscaler->start_capture(wstring_to_string(dir.wstring()), frames);
+            cfg.PrismCaptureLastDir = dir.wstring();
+            cfg.PrismCaptureWritten = 0;
+            cfg.PrismCaptureRequested.store(_impl->upscaler->capture_requested(), std::memory_order_release);
+            LOG_INFO("Prism: capturing {} frames into {}", frames, wstring_to_string(dir.wstring()));
+        }
+
         if (FAILED(interop->BeginVkCommandBufferInterop(InCommandList, &frame.cmd)))
         {
             LOG_ERROR("Prism: BeginVkCommandBufferInterop failed");
@@ -287,6 +311,24 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
         _impl->upscaler->record(frame, params, reset != 0);
         interop->EndVkCommandBufferInterop(InCommandList);
+
+        if (cfg.PrismCaptureRequested.load() > 0)
+        {
+            int written = _impl->upscaler->capture_written();
+            if (written != cfg.PrismCaptureWritten.load())
+            {
+                cfg.PrismCaptureWritten = written;
+                if (written == _impl->upscaler->capture_requested())
+                    LOG_INFO("Prism: capture done, {} frames", written);
+            }
+            cfg.PrismCaptureRequested = _impl->upscaler->capture_requested(); // shortened if it stopped early
+            if (auto error = _impl->upscaler->capture_error(); error != _impl->lastCaptureError)
+            {
+                if (!error.empty())
+                    LOG_ERROR("Prism: capture: {}", error);
+                _impl->lastCaptureError = error;
+            }
+        }
 
         // Games keep a few frames in flight; eight evaluations after a resize the old upscaler is long done.
         if (!_impl->retired.empty() && ++_impl->evaluationsSinceRetire > 8)

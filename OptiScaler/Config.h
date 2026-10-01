@@ -2,6 +2,7 @@
 #include "SysUtils.h"
 #include "State.h"
 
+#include <atomic>
 #include <optional>
 #include <filesystem>
 
@@ -503,6 +504,13 @@ class Config
     CustomOptional<float> PrismDisocclusionMotion { 0.25f };  // render px per frame for the full gate
     CustomOptional<int32_t> PrismDebugView { 0 };          // overlay only, not saved: NssFrameParams::debug_view
     CustomOptional<bool> PrismDisableHistory { false };    // overlay only, not saved: every frame starts a sequence
+    // Frame capture: NSS's inputs of consecutive frames as prism-cli nss-sequence frames, for offline replay
+    CustomOptional<std::wstring, NoDefault> PrismCaptureDir; // default: prism-capture next to the dll
+    CustomOptional<int32_t> PrismCaptureFrames { 60 };
+    CustomOptional<bool> PrismCaptureNow { false };        // overlay only, not saved: start on the next frame
+    std::atomic<int32_t> PrismCaptureWritten { 0 };        // overlay status, set by the Prism feature
+    std::atomic<int32_t> PrismCaptureRequested { 0 };
+    std::wstring PrismCaptureLastDir;                      // written before PrismCaptureRequested is set
     CustomOptional<bool> FsrUseFsrInputValues { true };
 
     // dx11wdx12

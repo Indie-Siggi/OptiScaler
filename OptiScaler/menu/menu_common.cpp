@@ -2727,6 +2727,24 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
                 config->PrismDisableHistory = disableHistory;
             ShowHelpMarker("Every frame starts a new sequence: only the current frame is used. Not saved");
 
+            int captureFrames = config->PrismCaptureFrames.value_or_default();
+            if (ImGui::InputInt("Frames##PrismCapture", &captureFrames, 10, 60))
+                config->PrismCaptureFrames = std::clamp(captureFrames, 1, 600);
+            ImGui::SameLine(0.0f, 6.0f);
+            int captureRequested = config->PrismCaptureRequested.load(std::memory_order_acquire);
+            int captureWritten = config->PrismCaptureWritten.load();
+            bool captureRunning = captureRequested > 0 && captureWritten < captureRequested;
+            ImGui::BeginDisabled(captureRunning || config->PrismCaptureNow.value_or_default());
+            if (ImGui::Button("Capture Frames"))
+                config->PrismCaptureNow = true;
+            ImGui::EndDisabled();
+            ShowHelpMarker("Writes the inputs NSS receives (color, motion, depth, parameters) of the next frames\n"
+                           "for offline replay with prism-cli nss-sequence (CaptureDir in the ini; about 12 MB\n"
+                           "per frame at 960x540 render size). Keep the camera on the scene while it runs");
+            if (captureRequested > 0)
+                ImGui::Text("%d / %d frames written to %s", captureWritten, captureRequested,
+                            wstring_to_string(config->PrismCaptureLastDir).c_str());
+
             bool flipX = config->PrismJitterScaleX.value_or_default() < 0.0f;
             if (ImGui::Checkbox("Flip Jitter X", &flipX))
                 config->PrismJitterScaleX = flipX ? -1.0f : 1.0f;
