@@ -498,6 +498,9 @@ class Config
     CustomOptional<float> PrismMotionScaleY { 1.0f };
     CustomOptional<float> PrismHistoryClamp { 1.0f };      // scales NSS's history clamp window (lower: less ghosting)
     CustomOptional<float> PrismAntiGhost { 0.0f };         // rejects stale history outside the clamp window
+    CustomOptional<float> PrismDisocclusionGate { 0.0f };  // cuts stale history where the background was uncovered
+    CustomOptional<float> PrismDisocclusionTolerance { 0.1f };
+    CustomOptional<float> PrismDisocclusionMotion { 0.25f };  // render px per frame for the full gate
     CustomOptional<int32_t> PrismDebugView { 0 };          // overlay only, not saved: NssFrameParams::debug_view
     CustomOptional<bool> PrismDisableHistory { false };    // overlay only, not saved: every frame starts a sequence
     CustomOptional<bool> FsrUseFsrInputValues { true };

@@ -2696,12 +2696,31 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
             ShowHelpMarker("Rejects history that no longer matches the current frame (e.g. wind-blown foliage);\n"
                            "higher = stronger, 0 = NSS as trained");
 
-            const char* debugViews[] = { "Off", "Theta", "Alpha", "Gamma", "Motion" };
+            float gate = config->PrismDisocclusionGate.value_or_default();
+            if (ImGui::SliderFloat("Disocclusion Gate", &gate, 0.0f, 1.0f, "%.2f"))
+                config->PrismDisocclusionGate = gate;
+            ShowHelpMarker("Cuts stale history where the background was just uncovered next to a moving object\n"
+                           "(e.g. wind-blown foliage over the sky): each pixel's own depth and motion against the\n"
+                           "previous frame's depth; 0 = NSS as trained, 1 = full");
+
+            float gateTolerance = config->PrismDisocclusionTolerance.value_or_default();
+            if (ImGui::SliderFloat("Gate Tolerance", &gateTolerance, 0.01f, 1.0f, "%.2f"))
+                config->PrismDisocclusionTolerance = gateTolerance;
+            ShowHelpMarker("How much farther (relative view depth) a pixel must be than what was there before");
+
+            float gateMotion = config->PrismDisocclusionMotion.value_or_default();
+            if (ImGui::SliderFloat("Gate Motion", &gateMotion, 0.05f, 2.0f, "%.2f px"))
+                config->PrismDisocclusionMotion = gateMotion;
+            ShowHelpMarker("Motion of the nearer object (render pixels per frame) at which the gate is full:\n"
+                           "lower removes more ghosting, costs more detail on the moving object");
+
+            const char* debugViews[] = { "Off", "Theta", "Alpha", "Gamma", "Motion", "Gate" };
             int debugView = config->PrismDebugView.value_or_default();
             if (ImGui::Combo("Debug View", &debugView, debugViews, IM_ARRAYSIZE(debugViews)))
                 config->PrismDebugView = debugView;
             ShowHelpMarker("Gray output: theta = unclamped history kept, alpha = current frame blended in,\n"
-                           "gamma = history clamp window, motion = motion length (16 px = white). Not saved");
+                           "gamma = history clamp window, motion = motion length (16 px = white),\n"
+                           "gate = where the disocclusion gate cut the history. Not saved");
 
             bool disableHistory = config->PrismDisableHistory.value_or_default();
             if (ImGui::Checkbox("Disable History", &disableHistory))
