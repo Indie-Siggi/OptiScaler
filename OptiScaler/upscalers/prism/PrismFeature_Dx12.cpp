@@ -53,6 +53,8 @@ struct PrismFeatureDx12::Impl
     unsigned int width = 0, height = 0, outWidth = 0, outHeight = 0;
     unsigned int evaluationsSinceRetire = 0;
     bool exposureWarned = false;
+    bool inputsLogged = false;
+    bool maskLogged = false, maskUnsupported = false; // the bias current color mask's format, logged once
     std::string lastCaptureError; // logged once
 };
 
@@ -209,6 +211,22 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         return false;
     }
 
+    // The game's bias current color (reactive) mask: NSS has no input for it, a frame capture records it. Optional:
+    // an unusable mask never fails the frame.
+    if (auto* mask = GetResource(InParameters, NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask);
+        mask && !_impl->maskUnsupported)
+    {
+        if (!ToNssImage(interop, mask, read, false, &frame.mask, "bias current color mask"))
+            _impl->maskUnsupported = true; // logged by ToNssImage, once
+        else if (!_impl->maskLogged)
+        {
+            _impl->maskLogged = true;
+            auto desc = mask->GetDesc();
+            LOG_INFO("Prism: bias current color mask {}x{}, DXGI format {}, Vulkan format {}", desc.Width,
+                     desc.Height, (int) desc.Format, (int) frame.mask.format);
+        }
+    }
+
     // NGX motion vectors times MV_Scale are pixels pointing to the previous position; NSS wants current minus previous.
     float mvScale[2] = { 1.0f, 1.0f };
     InParameters->Get(NVSDK_NGX_Parameter_MV_Scale_X, &mvScale[0]);
@@ -257,6 +275,22 @@ bool PrismFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     const float tanHalfVertical = std::tan(verticalFov * 0.5f);
     params.depth_params[2] = tanHalfVertical * (float) width / (float) height;
     params.depth_params[3] = tanHalfVertical;
+
+    // Which optional masks the game passes (NSS has no input for them; FSR uses the bias mask as its reactive mask).
+    auto hasResource = [&](const char* name)
+    {
+        ID3D12Resource* resource = nullptr;
+        return InParameters->Get(name, (void**) &resource) == NVSDK_NGX_Result_Success && resource != nullptr;
+    };
+    _accessToReactiveMask = hasResource(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask);
+    _hasTM = hasResource(NVSDK_NGX_Parameter_TransparencyMask);
+    if (!_impl->inputsLogged)
+    {
+        _impl->inputsLogged = true;
+        LOG_INFO("Prism: game masks: bias current color {}, transparency {}, animated texture {}, exposure texture {}",
+                 _accessToReactiveMask, _hasTM, hasResource(NVSDK_NGX_Parameter_AnimatedTextureMask),
+                 hasResource(NVSDK_NGX_Parameter_ExposureTexture));
+    }
 
     unsigned int reset = 0;
     InParameters->Get(NVSDK_NGX_Parameter_Reset, &reset);

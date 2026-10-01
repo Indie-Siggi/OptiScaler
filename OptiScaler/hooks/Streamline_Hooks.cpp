@@ -3,6 +3,9 @@
 #include "Streamline_Hooks.h"
 
 #include <Util.h>
+
+#include <bitset>
+#include <mutex>
 #include <Config.h>
 
 #include <nvapi/fakenvapi.h>
@@ -354,6 +357,24 @@ sl::Result StreamlineHooks::hkslSetFeatureLoaded(sl::Feature feature, bool loade
     return o_slSetFeatureLoaded(feature, loaded);
 }
 
+// Logs each resource type the game tags, once: which optional inputs (e.g. the bias current color hint) it provides.
+static void LogNewTagTypes(const sl::ResourceTag* tags, uint32_t numTags)
+{
+    static std::mutex mutex;
+    static std::bitset<256> seen;
+    std::lock_guard<std::mutex> lock(mutex);
+
+    for (uint32_t i = 0; i < numTags; i++)
+    {
+        const uint32_t type = tags[i].type;
+        if (tags[i].resource == nullptr || tags[i].resource->native == nullptr || type >= seen.size() || seen[type])
+            continue;
+
+        seen[type] = true;
+        LOG_INFO("Game tags Streamline resource {} ({})", magic_enum::enum_name((BufferType) type), type);
+    }
+}
+
 sl::Result StreamlineHooks::hkslSetTag(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags,
                                        uint32_t numTags, sl::CommandBuffer* cmdBuffer)
 {
@@ -371,6 +392,8 @@ sl::Result StreamlineHooks::hkslSetTag(const sl::ViewportHandle& viewport, const
         LOG_WARN("Game trying to remove a tag");
         return o_slSetTag(viewport, tags, numTags, cmdBuffer);
     }
+
+    LogNewTagTypes(tags, numTags);
 
     if (State::Instance().activeFgInput == FGInput::DLSSG &&
         State::Instance().gameQuirks[GameQuirk::IgnoreTagsWithoutHudlessForFG])
@@ -460,6 +483,7 @@ sl::Result StreamlineHooks::hkslSetTagForFrame(const sl::FrameToken& frame, cons
     }
 
     LOG_DEBUG("frameIndex: {}", static_cast<uint32_t>(frame));
+    LogNewTagTypes(resources, numResources);
 
     if (State::Instance().activeFgInput == FGInput::DLSSG &&
         State::Instance().gameQuirks[GameQuirk::IgnoreTagsWithoutHudlessForFG])
