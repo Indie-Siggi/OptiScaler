@@ -16,29 +16,20 @@ interface (`ID3D12DXVKInteropDevice1`) and records NSS straight into the game's 
 - Runs in **Cyberpunk 2077** (DLSS inputs, Performance mode) on an RX 9070 XT: 5.4 ms per frame for 1080p to 4K.
 - Known problem: **ghosting on thin wind-blown foliage** (palm fronds over the sky). The game draws those leaves as
   a screen-door dither and relies on its own temporal anti-aliasing to blend it; NSS was not trained on such content
-  and keeps a blended haze where the leaves were. The settings below (History Clamp, Anti-Ghost, Disocclusion Gate)
+  and keeps a blended haze where the leaves were. The post-processing settings (History Clamp, Anti-Ghost, Disocclusion Gate)
   do not fix it; the Prism README explains the analysis.
 
-## Building
+## Building and setup
 
-1. Build libprism as a static library on Windows: in a Prism checkout, copy the shaders built on Linux
-   (`build/shaders/*.spv.h`) into `prebuilt-shaders/` and run `interop\build-windows.bat <this OptiScaler checkout>`.
-2. Build OptiScaler as usual, adding `/p:PrismDir=<Prism checkout>`:
-   `msbuild OptiScaler.sln /p:Configuration=Release /p:Platform=x64 /p:PrismDir=C:\path\to\prism-nr`.
-   Without `PrismDir` the backend is compiled out and reports that it is unavailable.
+The step-by-step guide is in the Prism repository:
+[docs/optiscaler.md](https://github.com/Indie-Siggi/prism-nr/blob/main/docs/optiscaler.md). In short: build
+libprism on Windows (`interop\build-windows.bat <this OptiScaler checkout>` in a Prism checkout), build OptiScaler
+with `/p:PrismDir=<Prism checkout>`, export the NSS model with weights you download yourself (Arm AI Model Community
+License), install the package into the game as `dxgi.dll`, and set `[Upscalers] Dx12Upscaler=prism` and
+`[Prism] ModelPath`. Without `PrismDir` the backend is compiled out and reports that it is unavailable.
 
-## Using it
-
-- NSS's weights are not included (they are under the Arm AI Model Community License). Download them with Prism's
-  `tools/fetch_nss.sh`, export the network as a Prism model (see the Prism README) and set `[Prism] ModelPath` to
-  that folder. The path has to be visible to the game: a Flatpak launcher may not see your home directory.
-- Select it with `[Upscalers] Dx12Upscaler=prism` or in the overlay.
-- `[Prism]` in `OptiScaler.ini` documents every setting: exposure, jitter and motion-vector scales, the history
-  clamp, anti-ghost and disocclusion-gate experiments, and the frame capture. The overlay has the same settings
-  plus debug views (theta, alpha, gamma, motion, gate).
-- **Frame capture:** "Capture Frames" in the overlay writes the inputs NSS receives (color, motion, depth,
-  parameters, the game's reactive mask) for the next frames, in the format `prism-cli nss-sequence` replays. About
-  12 MB per frame at 960x540 render size, 50 MB at 1920x1080.
+`[Prism]` in `OptiScaler.ini` documents every setting; the overlay has the same settings plus debug views and
+"Capture Frames", which records the inputs NSS receives for offline replay with `prism-cli nss-sequence`.
 
 Input conventions found for Cyberpunk 2077 (the defaults handle them): motion vectors are UV-space with
 `MV_Scale` = render size and get negated; the jitter is negated on both axes; depth is reversed-Z.
