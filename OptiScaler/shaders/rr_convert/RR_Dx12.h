@@ -13,7 +13,7 @@
 
 // NGX Ray-Reconstruction -> FFX-MLD 1-signal input conversion (6 SRV inputs -> 8 UAV outputs).
 // The 7 outputs are the MLD dispatch inputs; the denoised result is written by MLD to the app's
-// output target, not here. See RayRegenFeature_Dx12 + OPTISCALER_RR_PLAN.md "Path B".
+// output target, not here. See RayRegenFeature_Dx12.h.
 class RR_Dx12 : public Shader_Dx12
 {
   private:

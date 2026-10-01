@@ -64,7 +64,7 @@ bool FeatureProvider_Dx12::GetFeature(Upscaler upscaler, UINT handleId, NVSDK_NG
         else if (primaryGpu.rayRegenCapable)
         {
             // AMD FSR Ray Regeneration (FFX-MLD) fills the Ray Reconstruction slot on RDNA4,
-            // where the NVIDIA DLSS-D backend is unavailable. See OPTISCALER_RR_PLAN.md "Path B".
+            // where the NVIDIA DLSS-D backend is unavailable (upscalers/ffx/RayRegenFeature_Dx12.h).
             *feature = std::make_unique<RayRegenFeatureDx12>(handleId, parameters);
             break;
         }

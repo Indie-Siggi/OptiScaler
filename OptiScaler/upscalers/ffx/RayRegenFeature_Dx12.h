@@ -9,7 +9,6 @@
 // sqrt-encoded albedo, linear depth, UV motion vectors) by a compute shader, then handed to
 // AMD's denoiser via the FFX API (ffxCreateContextDescDenoiser / ffxDispatchDescDenoiser).
 //
-// Design + descriptor mapping: OPTISCALER_RR_PLAN.md "Path B" + "Appendix A".
 // MLD contract: ffx_denoiser.h (vendored from FFX SDK 2.2, MIT).
 
 #include "ffx_denoiser.h" // vendored: ffxCreateContextDescDenoiser / ffxDispatchDescDenoiserInput1Signal (C API)
@@ -24,8 +23,8 @@ class RayRegenFeatureDx12 : public IFeature_Dx12
   private:
     ffxContext _denoiserContext = nullptr;
 
-    // Per-game RR conversion profile (input conventions + denoiser mode + tunables). Step 2: the default
-    // profile from ResolveRRProfile(); per-game selection comes later (OPTISCALER_RR_PLAN.md Appendix B).
+    // RR conversion profile (input conventions + denoiser mode + tunables) from ResolveRRProfile(); for now
+    // the default one, per-game selection comes later.
     RRGameProfile _profile;
 
     // Needed for ffxDispatchDescDenoiser.cameraPositionDelta (PreviousPosition - CurrentPosition).

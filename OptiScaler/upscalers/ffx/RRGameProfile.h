@@ -4,11 +4,10 @@
 
 // Per-game RR conversion profile.
 //
-// Step 2 (OPTISCALER_RR_PLAN.md Appendix B): this holds the current global tunables + denoiser mode as a
-// single "default" profile so RayRegenFeature_Dx12 routes through one struct instead of scattered members.
-// Steps 3-4 add input bindings (logical input -> NGX key / Streamline / derived) and convention enums
-// (normal space, MV convention, depth/reversed-Z, albedo encoding, radiance convention) here. Step 5
-// selects per-game profiles by State::GameName / NVNGX_Engine, with [RayRegen] ini overriding any field.
+// Holds the input conventions, tunables and denoiser mode as one "default" profile, so RayRegenFeature_Dx12
+// routes through one struct. Games differ in how they pass the DLSS-RR inputs (normal space, motion vector
+// convention, reversed-Z, albedo encoding, radiance scale); the plan is per-game profiles selected by
+// State::GameName / NVNGX_Engine, with the [RayRegen] ini keys overriding any field.
 struct RRGameProfile
 {
     const char* name = "default";
@@ -36,7 +35,7 @@ struct RRGameProfile
     float disocclusionThreshold = -1.0f;
 };
 
-// Resolve the active RR profile. Step 2: the default profile populated from OptiScaler.ini [RayRegen].
-// TODO(Step 5): branch on State::Instance().GameName / NVNGX_Engine for per-game profiles, then apply
+// Resolve the active RR profile: for now the default profile, populated from OptiScaler.ini [RayRegen].
+// TODO: branch on State::Instance().GameName / NVNGX_Engine for per-game profiles, then apply
 // the [RayRegen] ini overrides on top of the selected profile.
 RRGameProfile ResolveRRProfile();

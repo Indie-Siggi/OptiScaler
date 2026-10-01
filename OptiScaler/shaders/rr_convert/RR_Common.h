@@ -53,7 +53,8 @@ struct alignas(256) RRConstants
 //   linearDepth (abs linear), motionVectors (RG=UV, B=depth delta), normals (RG=octahedral,
 //   B=linear roughness, A=material), specular/diffuse albedo (sqrt-encoded; NON_GAMMA OFF),
 //   fusedAlbedo = sqrt(max(spec,diff)), radiance (DEMODULATED colour = color/fusedLinear; the
-//   resolve pass re-modulates). See OPTISCALER_RR_PLAN.md Appendix A3.6.
+//   resolve pass re-modulates). MLD denoises lighting, not surface colour: dividing by the albedo here and
+//   multiplying it back after denoising keeps texture detail out of the denoiser.
 inline static std::string shaderCode = R"(
 cbuffer Params : register(b0)
 {
@@ -125,7 +126,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     // Device depth -> abs linear view-space depth, clamped to [near, far] (what FFX-MLD wants for linearDepth).
     // Preferred: invert the real ViewToClip z/w mapping, viewZ = (B - dd*D)/(dd*C - A) (handles reversed-Z and
     // infinite-far automatically; coefficients are the projection matrix Cyberpunk provides). Fallback: the old
-    // near/far closed form if no matrix was available. See RR_BUILD_DEPLOY.md + FFX ffx_denoiser.h.
+    // near/far closed form if no matrix was available. See FFX ffx_denoiser.h for what MLD expects.
     float dd = InDepth.Load(p);
     float viewZ;
     if (HasDepthMatrix != 0u)
@@ -148,7 +149,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     // Sky / far-plane skip-signal for the post-denoise recomposition pass. The MLD denoiser zeroes
     // far-plane (sky) pixels even with finite depth + neutral albedo (the persistent black sky), so flag
     // sky pixels here and carry the original colour; the resolve pass lerps it back over the denoised
-    // result. Reproduces the DarkHelmet oracle's skip-signal sky bypass. See RR_BUILD_DEPLOY.md.
+    // result. The same sky bypass DarkHelmet's OptiScaler fork uses (its skip-signal).
     float skyMask = (viewZ >= FarPlane * SkyThreshold) ? 1.0 : 0.0;
     OutSkipSignal[tid.xy] = float4(color, skyMask);
 
@@ -189,7 +190,8 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     OutSpecularAlbedo[tid.xy] = float4(sqrt(max(spec, 0.0)), 1.0);
     // `fused` is the LINEAR fused albedo: it demodulates the radiance here and re-modulates it in the resolve.
     // It must NEVER be 0: a zero guide divides the radiance to black (the black-sky bug when a game feeds no
-    // albedo). Epsilon-clamp the real albedo (the oracle adds +0.01); neutral 1.0 when none -> identity guide.
+    // albedo). Epsilon-clamp the real albedo (+0.01, as DarkHelmet's fork does); neutral 1.0 when none ->
+    // identity guide.
     // The stored guide is sqrt(fused) (AMD stores sqrt(fusedAlbedo) and decodes via Square in compose).
     float3 fused = ((InputMask & (4u | 8u)) != 0u) ? max(max(spec, diff), 0.01) : float3(1.0, 1.0, 1.0);
     OutFusedAlbedo[tid.xy] = float4(sqrt(fused), 1.0);

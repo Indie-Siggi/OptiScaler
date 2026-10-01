@@ -8,15 +8,15 @@
 #include "RayRegenFeature_Dx12.h"
 #include "ffx_upscale.h"
 
-// AMD FSR Ray Regeneration (FFX-MLD) backend. See RayRegenFeature_Dx12.h and
-// OPTISCALER_RR_PLAN.md "Path B" for the NGX-RR -> MLD 1-signal mapping.
+// AMD FSR Ray Regeneration (FFX-MLD) backend. See RayRegenFeature_Dx12.h for the NGX-RR -> MLD 1-signal
+// mapping.
 //
 // The conversion shader (shaders/rr_convert/RR_Common.h) re-encodes the intercepted NGX-RR inputs into
 // the MLD 1-signal contract: abs linear depth, octahedral normals (+roughness/material), sqrt-encoded
 // albedo, fusedAlbedo = sqrt(max(spec,diff)), UV motion vectors + depth delta, and a DEMODULATED radiance
 // (color / fusedLinear). MLD denoises in demodulated (lighting) space; the resolve pass (RR_Resolve_Common.h)
 // re-modulates the denoised radiance by fusedLinear and recomposes the sky. The demod (here) and remod
-// (resolve) are paired via DemodulateRadiance / ReModulate. See OPTISCALER_RR_PLAN.md Appendix A3.6.
+// (resolve) are paired via DemodulateRadiance / ReModulate.
 
 namespace
 {
@@ -230,7 +230,7 @@ bool RayRegenFeatureDx12::CreateDenoiserContext(ID3D12GraphicsCommandList* InCom
 
     GetRenderResolution(InParameters, &_renderWidth, &_renderHeight);
 
-    // Resolve the per-game RR conversion profile (Step 2: default profile from [RayRegen] ini).
+    // Resolve the RR conversion profile (for now the default profile from the [RayRegen] ini keys).
     _profile = ResolveRRProfile();
     LOG_INFO("RR profile: {0}", _profile.name);
 
@@ -452,7 +452,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // Camera near/far/fov + frame time. Read the FSR.* keys the game/OptiScaler may populate, else fall
     // back to sane defaults. The camera basis vectors (right/up/forward) and positionDelta require the
     // view matrix, which NGX does not expose here (only Position_ViewSpace), so they are left zero and the
-    // denoiser falls back to motion-vector-only reprojection. TODO(Phase 5): recover the view matrix.
+    // denoiser falls back to motion-vector-only reprojection. TODO: recover the view matrix.
     float camNear = 0.0f, camFar = 0.0f, camFov = 0.0f, frameTimeMs = 0.0f;
 
     // Track whether the camera planes came from NGX or our fallback default: if Cyberpunk does not populate
@@ -576,7 +576,7 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     ID3D12Resource* inExposure = nullptr; InParameters->Get(NVSDK_NGX_Parameter_ExposureTexture, &inExposure);
     const bool useExposure = Config::Instance()->RrUseExposureTexture.value_or_default() && inExposure != nullptr;
 
-    // Only colour/depth/output are mandatory. Missing optional GBuffer inputs degrade gracefully (Step 1):
+    // Only colour/depth/output are mandatory. Missing optional GBuffer inputs degrade gracefully:
     // their SRV is bound to a valid stand-in (colour) and the shader ignores it via InputMask, so an
     // unprofiled game keeps rendering (to tune) instead of bricking the feature.
     if (inColor == nullptr || inOutput == nullptr || inDepth == nullptr)
@@ -673,8 +673,8 @@ bool RayRegenFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandL
     // Make the converted inputs readable by the denoiser.
     _convert->TransitionOutputs(InCommandList, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    // Albedo guides are sqrt-encoded in the conversion shader (AMD's MLD convention; see RR_Common.h +
-    // OPTISCALER_RR_PLAN.md A3.6), so NON_GAMMA is intentionally NOT set: the denoiser assumes sqrt albedo.
+    // Albedo guides are sqrt-encoded in the conversion shader (AMD's MLD convention; see RR_Common.h), so
+    // NON_GAMMA is intentionally NOT set: the denoiser assumes sqrt albedo.
 
     // Always-bound guide buffers (from the converter).
     dispatchDesc.linearDepth = ffxApiGetResourceDX12(_convert->LinearDepth(), FFX_API_RESOURCE_STATE_COMPUTE_READ);

@@ -29,7 +29,7 @@ RRGameProfile ResolveRRProfile()
     p.gaussianKernelRelaxation = cfg.RrGaussianKernelRelaxation.value_or_default();
     p.disocclusionThreshold = cfg.RrDisocclusionThreshold.value_or_default();
 
-    // TODO(Step 5): switch on State::Instance().GameName / NVNGX_Engine to pick a per-game profile
+    // TODO: switch on State::Instance().GameName / NVNGX_Engine to pick a per-game profile
     // (e.g. a Cyberpunk profile), then let the [RayRegen] ini values override individual fields.
 
     return p;

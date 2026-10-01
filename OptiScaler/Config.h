@@ -422,7 +422,7 @@ class Config
     CustomOptional<uint32_t, NoDefault> Fsr4Model;
     CustomOptional<bool> Fsr4EnableWatermark { false };
 
-    // FSR Ray Regeneration (FFX-MLD) NGX-RR -> MLD conversion tunables ([RayRegen]); tune in-game (Phase 5).
+    // FSR Ray Regeneration (FFX-MLD) NGX-RR -> MLD conversion tunables ([RayRegen]), tuned per game.
     CustomOptional<float> RrDepthLinA { 1.0f };       // linearDepth = 1 / (A * deviceDepth + B)
     CustomOptional<float> RrDepthLinB { 0.0f };
     CustomOptional<float> RrMotionScaleX { 1.0f };    // NGX motion vectors -> UV (PreviousUV - CurrentUV)
@@ -438,10 +438,9 @@ class Config
     // FFX-MLD denoiser tuning floats, applied once at context creation (ffxConfigure). -1 = leave at the
     // denoiser's internal default (no override). AMD's own UI ranges (FidelityFX_Denoiser sample):
     // CrossBilateralNormalStrength 0..1, StabilityBias 0..1, GaussianKernelRelaxation 0..1,
-    // DisocclusionThreshold 0.01..0.05, MaxRadiance / RadianceClipStdK 0..65504. The non--1 defaults below
-    // are PROVISIONAL guesses biased toward sharpness (to counter the current over-blur) pending the
-    // RenderDoc convention diagnosis (see reports/2026-06-09-rr-overblur-renderdoc-capture-plan.md); the
-    // real over-blur fix is likely a depth/motion-vector convention, not tuning.
+    // DisocclusionThreshold 0.01..0.05, MaxRadiance / RadianceClipStdK 0..65504. The defaults below lean toward
+    // sharpness; AMD's sample runs StabilityBias 1.0, RadianceClipStdK 50, GaussianKernelRelaxation 0,
+    // CrossBilateralNormalStrength 1.0, DisocclusionThreshold 0.01.
     CustomOptional<float> RrCrossBilateralNormalStrength { 1.0f };  // edge-stop by normals; higher = sharper edges
     CustomOptional<float> RrStabilityBias { 0.5f };                // temporal stability vs responsiveness (mid)
     CustomOptional<float> RrMaxRadiance { -1.0f };                 // max radiance clamp (firefly); leave default
